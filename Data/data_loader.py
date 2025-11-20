@@ -30,16 +30,15 @@ class DataTimeseries:
         print(f'\nDataframe post-processing shape: {df.shape}')
         print(f'Dataframe post-processing columns: {df.columns}')
 
-        # remove duplicates indexes
-        df = df.groupby(df.index).min()
+        # sort the data
+        df.sort_index(ascending=False, inplace=True)
+
+        # remove duplicates
+        df = df.groupby(df.index, sort=False).min()
         assert df.index.is_unique, "Duplicate Indicies!"
 
         # set index to datetime object
         df.index = pd.to_datetime(df.index)
-
-        # sort the data
-        df.sort_index(ascending=False, inplace=True)
-        print(df)
 
         return df
 
