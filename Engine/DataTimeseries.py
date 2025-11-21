@@ -105,3 +105,20 @@ class DataTimeseries:
         }).dropna()
 
         return resampled_df
+
+    def get_close_prices(self, start: pd.Timestamp = None, end: pd.Timestamp = None) -> pd.Series:
+        if start is not None and start not in self.df.index:
+            raise ValueError(f"Start index {start} is not valid.")
+        if end is not None and end not in self.df.index:
+            raise ValueError(f"End index {end} is not valid.")
+
+        if start is None and end is None:
+            return self.df['Close']
+
+        return self.df.loc[start:end, 'Close']
+
+    def get_start_date(self) -> pd.Timestamp:
+        return self.df.index[0]
+
+    def get_end_date(self) -> pd.Timestamp:
+        return self.df.index[-1]

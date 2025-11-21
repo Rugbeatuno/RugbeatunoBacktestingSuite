@@ -3,12 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 import mplfinance as mpf
-from Data.DataTimeseries import DataTimeseries
-import sys
-from pathlib import Path
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-sys.path.append(str(BASE_DIR))
+from Engine.DataTimeseries import DataTimeseries
 
 
 class Chart:
