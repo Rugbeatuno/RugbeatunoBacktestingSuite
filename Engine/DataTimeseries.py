@@ -52,7 +52,7 @@ class DataTimeseries:
 
         df.index = df['Time']
         df.drop(columns=['Change', '%Chg', 'Time'],
-                inplace=True, errors='raise')
+                inplace=True, errors='ignore')
 
         # sort the data
         df.sort_index(ascending=True, inplace=True)
@@ -105,7 +105,3 @@ class DataTimeseries:
         }).dropna()
 
         return resampled_df
-
-
-if __name__ == '__main__':
-    DataTimeseries('./data_combined.csv')
