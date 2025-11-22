@@ -31,7 +31,7 @@ class DataTimeseries:
     ]
 
     def __init__(self, filepath: str):
-        self.timezone = 'America/Chicago'
+        self.timezone: str = 'America/Chicago'
         self.timeframe = '1min'
 
         self._filepath: str = filepath
@@ -51,8 +51,12 @@ class DataTimeseries:
         print(f'Dataframe initial columns: {df.columns}')
 
         df.index = df['Time']
-        df.drop(columns=['Change', '%Chg', 'Time'],
-                inplace=True, errors='ignore')
+        df.drop(
+            columns=['Change', '%Chg', 'Time', 'ts_event', 'rtype',
+                     'publisher_id', 'instrument_id', 'symbol'],
+            inplace=True,
+            errors='ignore'
+        )
 
         # sort the data
         df.sort_index(ascending=True, inplace=True)
@@ -63,9 +67,10 @@ class DataTimeseries:
 
         # set index to datetime object
         df.index = pd.to_datetime(df.index)
+        self.timezone = df.index.tz
 
         # have pandas figure out timezone
-        df.index = df.index.tz_localize(self.timezone)
+        # df.index = df.index.tz_localize(self.timezone)
 
         print(f'\nDataframe post-processing shape: {df.shape}')
         print(f'Dataframe post-processing columns: {df.columns}')
@@ -81,6 +86,7 @@ class DataTimeseries:
     def convert_timezone(self, timezone: str):
         assert timezone in self.TIMEZONES, f"Invalid timezone '{timezone}'"
 
+        self.timezone = timezone
         self.df.index = self.df.index.tz_convert(timezone)
 
     def find_gaps(self) -> pd.DatetimeIndex:
@@ -93,7 +99,7 @@ class DataTimeseries:
 
         return missing
 
-    def resample(self, timeframe: str) -> pd.DataFrame:
+    def get_resampled_data(self, timeframe: str) -> pd.DataFrame:
         assert timeframe in self.TIMEFRAMES, f'Invalid resampling timeframe: "{timeframe}"'
 
         resampled_df = self.df.resample(timeframe, label='right', closed='left').agg({
@@ -122,3 +128,6 @@ class DataTimeseries:
 
     def get_end_date(self) -> pd.Timestamp:
         return self.df.index[-1]
+
+    def get_raw_data(self) -> pd.DataFrame:
+        return self.df
