@@ -1,9 +1,9 @@
+import pandas_ta as ta
 from Engine.DataTimeseries import DataTimeseries
 from Engine.Backtester import Backtester
 from Graphics.Chart import Chart
 from Engine.EquityCurve import EquityCurve
 
-import pandas_ta as ta
 import pandas as pd
 import numpy as np
 
@@ -13,6 +13,7 @@ EMSD_SHORT_LENGTH = 64 * 2
 EMSD_LONG_LENGTH = 256 * 2
 
 data_timeseries = DataTimeseries('./Data/nq2010-2025.csv')
+m5_resampled = data_timeseries.get_resampled_data('5min')
 close: pd.Series = data_timeseries.get_close_prices()
 print(close)
 
@@ -96,10 +97,14 @@ signal[combined_forecast > w4] = 1
 signal[combined_forecast < -w4] = -1
 signal_series = pd.Series(signal, index=df.index)
 
-backtester = Backtester(data_timeseries, signal_series)
+backtester = Backtester(data_timeseries, signal_series,
+                        tick_value=0.5, contract_multiplier=2, slippage_ticks=8)
 print(backtester)
 
-backtester.equity_curve.plot("Strategy Equity Curve")
-backtester.bh_equity_curve.plot("Buy and Hold Equity Curve")
+strategy_ret = backtester.generate_equity_curve()
+bh_ret = backtester.generate_buy_hold_equity_curve()
+
 EquityCurve.combine_equity_curves(
-    [backtester.equity_curve, backtester.bh_equity_curve], ["Strategy", "Buy & Hold"])
+    [strategy_ret, bh_ret], ["Strategy", "Buy & Hold"])
+
+skew_curve = backtester.generate_skew_curve().plot()

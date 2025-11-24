@@ -2,21 +2,27 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
+# !todo add drawdown, max drawdown
+
 
 class EquityCurve:
-    def __init__(self, initial_equity: float, signal: pd.Series, log_returns: pd.Series):
-        self.initial_equity: float = initial_equity
-        self.signal: pd.Series = signal
-        self.log_returns: pd.Series = log_returns
-        self.equity_values: pd.Series = np.exp(
-            log_returns.cumsum()) * initial_equity
-        self.dates: pd.DatetimeIndex = log_returns.index
+    def __init__(self, equity_curve: pd.Series, trade_indicies: pd.Series, start_date: pd.Timestamp = None, end_date: pd.Timestamp = None):
+        if len(equity_curve) != len(trade_indicies):
+            raise ValueError(
+                "Length of equity_curve != length of trade_indicies.")
+
+        self.start_date = start_date if start_date else equity_curve.index[0]
+        self.end_date = end_date if end_date else equity_curve.index[-1]
+
+        self.trade_indicies: pd.Series = trade_indicies.loc[self.start_date: self.end_date]
+        self.equity_values: pd.Series = equity_curve.loc[self.start_date: self.end_date]
+        self.dates: pd.DatetimeIndex = self.equity_values.index
 
     def plot(self, label: str = "Equity Curve", ax: plt.Figure = None):
         # only equity changes when a trade occurs so check that the signal changes
-        trade_mask = self.signal.ne(self.signal.shift())
-        plotted_equity_values = self.equity_values[trade_mask]
-        plotted_times = self.dates[trade_mask]
+        plotted_equity_values = self.equity_values[self.trade_indicies.astype(
+            bool)]
+        plotted_times = self.dates[self.trade_indicies.astype(bool)]
 
         if ax:
             plt.plot(plotted_times, plotted_equity_values, label=label)
@@ -26,7 +32,7 @@ class EquityCurve:
             plt.plot(plotted_times, plotted_equity_values, label=label)
             plt.xlabel("Date")
             plt.ylabel("Equity Value")
-            plt.title("Equity Curve")
+            plt.title(f"Equity Curve ({self.start_date} -> {self.end_date})")
             plt.legend()
             plt.grid(True)
             plt.show()
@@ -43,7 +49,8 @@ class EquityCurve:
 
         plt.xlabel("Date")
         plt.ylabel("Equity Value")
-        plt.title("Combined Equity Curves")
+        plt.title(
+            f"Combined Equity Curves ({equity_curves[0].start_date} -> {equity_curves[0].end_date})")
         plt.legend()
         plt.grid(True)
         plt.show()

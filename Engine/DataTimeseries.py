@@ -39,11 +39,11 @@ class DataTimeseries:
 
         # self._find_gaps()
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.df.to_string()
 
     def _load_data(self) -> pd.DataFrame:
-        df = pd.read_csv(self._filepath, low_memory=True)
+        df: pd.DataFrame = pd.read_csv(self._filepath, low_memory=True)
 
         print(f'\nLoading {self._filepath}')
 
@@ -62,8 +62,11 @@ class DataTimeseries:
         df.sort_index(ascending=True, inplace=True)
 
         # remove duplicates
-        df = df.groupby(df.index, sort=False).min()
+        df = df.groupby(df.index, sort=False).max()
         assert df.index.is_unique, "Duplicate Indicies!"
+
+        # drop zeros or any value less than 1000
+        df = df[(df[['Open', 'High', 'Low', 'Close']] > 1000).all(axis=1)]
 
         # set index to datetime object
         df.index = pd.to_datetime(df.index)
@@ -94,7 +97,7 @@ class DataTimeseries:
         end_time: pd.Timestamp = self.df.index[-1]
 
         no_gaps: pd.DatetimeIndex = pd.date_range(
-            start=start_time, end=end_time, freq='1min')
+            start=start_time, end=end_time, freq=self.timeframe)
         missing: pd.DatetimeIndex = no_gaps.difference(self.df.index)
 
         return missing
@@ -102,7 +105,7 @@ class DataTimeseries:
     def get_resampled_data(self, timeframe: str) -> pd.DataFrame:
         assert timeframe in self.TIMEFRAMES, f'Invalid resampling timeframe: "{timeframe}"'
 
-        resampled_df = self.df.resample(timeframe, label='right', closed='left').agg({
+        self.df = self.df.resample(timeframe, label='right', closed='left').agg({
             'Open': 'first',
             'High': 'max',
             'Low': 'min',
@@ -110,7 +113,9 @@ class DataTimeseries:
             'Volume': 'sum',
         }).dropna()
 
-        return resampled_df
+        self.timeframe = timeframe
+
+        return self.df
 
     def get_close_prices(self, start: pd.Timestamp = None, end: pd.Timestamp = None) -> pd.Series:
         if start is not None and start not in self.df.index:
@@ -131,3 +136,6 @@ class DataTimeseries:
 
     def get_raw_data(self) -> pd.DataFrame:
         return self.df
+
+    def get_dates(self) -> pd.DatetimeIndex:
+        return self.df.index
