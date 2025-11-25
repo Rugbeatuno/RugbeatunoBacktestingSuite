@@ -139,3 +139,25 @@ class DataTimeseries:
 
     def get_dates(self) -> pd.DatetimeIndex:
         return self.df.index
+
+    def get_timeframe(self) -> str:
+        return self.timeframe
+
+    def generate_permuted_price_series(self) -> pd.Series:
+        """
+        Permutes returns (NOT prices) to create a randomized price path
+        with identical return distribution but no market structure.
+        """
+        close = self.df['Close'].copy()
+        log_returns = np.log(close).diff().fillna(0)
+
+        # Shuffle returns
+        shuffled_returns = np.random.permutation(log_returns.values)
+
+        # Convert back to synthetic price series
+        permuted_prices = pd.Series(
+            close.iloc[0] * np.exp(np.cumsum(shuffled_returns)),
+            index=log_returns.index
+        )
+
+        return permuted_prices
