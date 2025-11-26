@@ -12,11 +12,11 @@ import numpy as np
 
 EMSD_SHORT_WEIGHT = 0.7
 EMSD_LONG_WEIGHT = 0.3
-EMSD_SHORT_LENGTH = 64 * 2
-EMSD_LONG_LENGTH = 256 * 2
+EMSD_SHORT_LENGTH = 64
+EMSD_LONG_LENGTH = 256
 
-data_timeseries = DataTimeseries('./Data/nq2010-2025.csv')
-# m5_resampled = data_timeseries.get_resampled_data('5min')
+data_timeseries = DataTimeseries('./Data/nq_continous.csv', 'NQ')
+# m5_resampled = data_timeseries.get_resampled_data('1D')
 close: pd.Series = data_timeseries.get_close_prices()
 print(close)
 
@@ -100,14 +100,15 @@ signal[combined_forecast > w4] = 1
 signal[combined_forecast < -w4] = -1
 signal_series = pd.Series(signal, index=df.index)
 
-s = time.perf_counter()
 backtester = Backtester(data_timeseries, signal_series,
-                        tick_value=0.5, contract_multiplier=2, slippage_ticks=8)
-print(time.perf_counter() - s)
+                        tick_value=0.5, contract_multiplier=2, slippage_ticks=0)
+
 print(backtester)
 
 permuted_series = data_timeseries.generate_permuted_price_series()
-plot_price_series([permuted_series, close], ['permuted', 'std'], skip_bar=5)
+plot_price_series([permuted_series, close], [
+                  'permuted', 'std'], pct_of_bars=0.2)
+plot_price_series([close], ['close'], pct_of_bars=.2)
 
 strategy_ret = backtester.generate_equity_curve()
 bh_ret = backtester.generate_buy_hold_equity_curve()
@@ -118,4 +119,5 @@ bh_ret.plot('buy hold', show_drawdown=True)
 EquityCurve.combine_equity_curves(
     [strategy_ret, bh_ret], ["Strategy", "Buy & Hold"])
 
-skew_curve = backtester.generate_skew_curve().plot()
+backtester.generate_skew_curve().plot()
+backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.05)

@@ -47,7 +47,7 @@ def confidence_interval(k: int, n: int, alpha=0.05):
     return p_hat, lower, upper
 
 
-def plot_price_series(price_series: list, labels: list, skip_bar: int = 1, figsize=(14, 6)):
+def plot_price_series(price_series: list, labels: list, pct_of_bars: float = 1, figsize=(14, 6)):
     """
     Efficiently plot a large price series with optional skipping.
 
@@ -65,8 +65,7 @@ def plot_price_series(price_series: list, labels: list, skip_bar: int = 1, figsi
             if not isinstance(i, pd.Series):
                 raise TypeError("price_series must be a list of pandas Series")
 
-    if skip_bar < 1:
-        raise ValueError("skip_bar must be >= 1")
+    pct_of_bars = int(1 / pct_of_bars)
 
     if len(labels) != len(price_series):
         raise IndexError("Each price series must have a label")
@@ -76,13 +75,13 @@ def plot_price_series(price_series: list, labels: list, skip_bar: int = 1, figsi
     # Downsample by slicing
     for i in range(len(price_series)):
         series_to_plot = price_series[i]
-        if skip_bar > 1:
-            series_to_plot = price_series[i].iloc[::skip_bar]
+        if pct_of_bars > 1:
+            series_to_plot = price_series[i].iloc[::pct_of_bars]
 
         plt.plot(series_to_plot.index, series_to_plot.values,
                  linewidth=0.8, label=labels[i])
 
-    plt.title(f"Price Series (showing every {skip_bar} bars)")
+    plt.title(f"Price Series (showing every {pct_of_bars} bars)")
     plt.xlabel("Time")
     plt.ylabel("Price")
     plt.grid(True, alpha=0.25)

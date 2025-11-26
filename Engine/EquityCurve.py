@@ -51,7 +51,7 @@ class EquityCurve:
         ax1.plot(plotted_times, plotted_equity_values,
                  label=label, color="blue")
         ax1.set_ylabel("Equity Value")
-        ax1.set_title(f"Equity Curve ({self.start_date}to {self.end_date})")
+        ax1.set_title(f"Equity Curve {self.start_date} to {self.end_date}")
         ax1.grid(True)
         ax1.legend()
 
@@ -83,7 +83,7 @@ class EquityCurve:
         plt.xlabel("Date")
         plt.ylabel("Equity Value")
         plt.title(
-            f"Combined Equity Curves ({equity_curves[0].start_date} -> {equity_curves[0].end_date})")
+            f"Combined Equity Curves {equity_curves[0].start_date} to {equity_curves[0].end_date}")
         plt.legend()
         plt.grid(True)
         plt.show()

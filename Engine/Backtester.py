@@ -3,8 +3,9 @@ import numpy as np
 
 from Engine.DataTimeseries import DataTimeseries
 from Engine.EquityCurve import EquityCurve
-from Engine.SkewCurve import SkewCurve
+from Engine.PnLDistribution import SkewCurve
 from Engine.Utils import dollar_format, percentage_format, number_format, confidence_interval, bars_per_year
+from Engine.MonteCarloSimulation import pnl_resampling_test
 
 # equity curves
 # trade win distribution, skew analysis
@@ -132,9 +133,6 @@ class Backtester:
         # Short Trades Winrate: {percentage_format(self.short_trades_winrate)}
         # Long Trades Winrate:  {percentage_format(self.long_trades_winrate)}
 
-    def full_backtest(self, signal: pd.Series) -> None:
-        pass
-
     def quick_backtest(self) -> None:
         if len(self.signal) != len(self.close_prices):
             raise ValueError(
@@ -160,11 +158,6 @@ class Backtester:
 
     def calculate_raw_buy_hold_return(self) -> float:
         return self.close_prices.iloc[-1] / self.close_prices.iloc[0] - 1
-
-    # def calculate_buy_hold_return(self) -> float:
-    #     shares: float = self.initial_equity / self.close_prices.iloc[0]
-    #     final_equity: float = shares * self.close_prices.iloc[-1]
-    #     return final_equity / self.initial_equity - 1
 
     def generate_equity_curve(self) -> EquityCurve:
         return EquityCurve(self.equity_curve, self.drawdown_curve, self.trade_indicies)
@@ -255,14 +248,12 @@ class Backtester:
         # ----------------------------------------------------
         # USE YOUR DATASERIES TIMEFRAME
         bars_year = bars_per_year(self.data_timeseries.get_timeframe())
-
         # ----------------------------------------------------
         # 2. CAGR (your old version is correct)
         # ----------------------------------------------------
         years = self.duration.days / 365.25
         self.CAGR = ((self.end_equity / self.initial_equity)
                      ** (1 / years) - 1) if years > 0 else 0.0
-
         # ----------------------------------------------------
         # 3. Sharpe Ratio (correct annualization)
         # ----------------------------------------------------
@@ -292,3 +283,11 @@ class Backtester:
 
         self.profit_factor = total_gains / \
             total_losses if total_losses > 0 else float('inf')
+
+    def monte_carlo_pnl_resampling_test(self, iterations: int = 1000, pct_of_trades: float = 1):
+        trade_groups = self.trade_indicies.cumsum()
+        per_trade_pnl: np.ndarray = self.trade_pnl.groupby(
+            trade_groups).sum().values
+
+        pnl_resampling_test(per_trade_pnl, iterations,
+                            pct_of_trades=pct_of_trades)
