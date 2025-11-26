@@ -121,3 +121,4 @@ EquityCurve.combine_equity_curves(
 
 backtester.generate_skew_curve().plot()
 backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.05)
+backtester.monte_carlo_permutation_test(1000, 0.01, 'Walk Forward')

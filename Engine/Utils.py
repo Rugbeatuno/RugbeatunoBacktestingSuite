@@ -105,3 +105,27 @@ def bars_per_year(timeframe: str) -> int:
         return 365.25 / days
 
     raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+
+def p_value_one_tailed(mean: float, std: float, observed: float, tail="right") -> float:
+    """
+    Returns the 1-tailed p-value assuming normal distribution.
+
+    tail = "right" → P(X >= observed)
+    tail = "left"  → P(X <= observed)
+    """
+    if std <= 0:
+        raise ValueError("std deviation must be > 0")
+
+    z = (observed - mean) / std
+
+    if tail == "right":
+        # probability of being >= observed
+        return 1 - norm.cdf(z)
+
+    elif tail == "left":
+        # probability of being <= observed
+        return norm.cdf(z)
+
+    else:
+        raise ValueError("tail must be 'right' or 'left'")

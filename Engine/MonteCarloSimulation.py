@@ -1,10 +1,10 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from Engine.Utils import dollar_format
+from Engine.Utils import dollar_format, p_value_one_tailed
 
 
-def pnl_resampling_test(trade_dollar_returns: np.ndarray, iterations: int = 1000, pct_of_trades: float = 1):
+def pnl_resampling_test(trade_dollar_returns: np.ndarray, iterations: int, pct_of_trades: float):
     n_trades = len(trade_dollar_returns)
     step = int(1 / pct_of_trades)
     x = np.arange(0, n_trades, step)
@@ -51,7 +51,7 @@ def pnl_resampling_test(trade_dollar_returns: np.ndarray, iterations: int = 1000
     plt.plot(x, best_equity[x], color='blue',
              linewidth=1.5, label=f'Best Drawdown: {dollar_format(best_drawdown)}')
 
-    plt.title(f"Price Series (showing every {step} bars)")
+    plt.title(f"Monte Carlo PnL Resampling Test (showing every {step} bars)")
     plt.xlabel("Trades")
     plt.ylabel("Returns")
     plt.grid(True, alpha=0.25)

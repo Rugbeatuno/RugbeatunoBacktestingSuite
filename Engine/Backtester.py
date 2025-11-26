@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 from Engine.DataTimeseries import DataTimeseries
 from Engine.EquityCurve import EquityCurve
 from Engine.PnLDistribution import SkewCurve
-from Engine.Utils import dollar_format, percentage_format, number_format, confidence_interval, bars_per_year
+from Engine.Utils import dollar_format, percentage_format, number_format, confidence_interval, bars_per_year, p_value_one_tailed
 from Engine.MonteCarloSimulation import pnl_resampling_test
 
 # equity curves
@@ -291,3 +292,72 @@ class Backtester:
 
         pnl_resampling_test(per_trade_pnl, iterations,
                             pct_of_trades=pct_of_trades)
+
+    def monte_carlo_permutation_test(self, iterations: int = 1000, pct_of_trades: float = 1, title: str = ''):
+        null_hypothesis = self.total_pnl
+        permutation_returns = []
+        pct_of_trades = int(1 / pct_of_trades)
+
+        # create plotting mask
+        mask = np.zeros(len(self.equity_curve))
+        mask[::pct_of_trades] = 1
+        mask = mask.astype(bool)
+
+        # 1x2
+        fig, axes = plt.subplots(1, 2, figsize=(18, 6))
+        ax_left, ax_right = axes
+
+        for i in range(iterations):
+            permuted_series = self.data_timeseries.generate_permuted_price_series()
+            bt = Backtester(
+                permuted_series,
+                self.signal,
+                self.tick_value,
+                self.contract_multiplier,
+                self.initial_equity,
+                self.slippage_ticks,
+                self.commission
+            )
+
+            permutation_returns.append(bt.total_pnl)
+
+            equity_curve = bt.equity_curve[mask]
+            plt.plot(
+                equity_curve.index,
+                equity_curve.values,
+                linewidth=0.8,
+                color='gray'
+            )
+
+        # plot original equity curve
+        plt.plot(self.equity_curve[mask].index, self.equity_curve[mask].values,
+                 linewidth=1, color='blue')
+
+        ax_left.set_title(
+            f"Monte Carlo {title} Permutation Test (showing every {pct_of_trades} bars)")
+        ax_left.set_xlabel("Trades")
+        ax_left.set_ylabel("Returns")
+        ax_left.grid(True, alpha=0.25)
+        ax_left.legend()
+
+        # perform P-test
+        returns_np = np.array(permutation_returns)
+        mu = returns_np.mean()
+        std = returns_np.std()
+
+        p = p_value_one_tailed(mu, std, null_hypothesis, tail='right')
+
+        ax_right.hist(returns_np, bins=40, alpha=0.7, edgecolor='black')
+        ax_right.axvline(null_hypothesis, color='blue', linewidth=2,
+                         label=f'Actual = {null_hypothesis:.2f}')
+        ax_right.axvline(mu, color='red', linewidth=1.5,
+                         linestyle='--', label=f'Mean = {mu:.2f}')
+
+        ax_right.set_title(f"Permutation Distribution\np = {p}")
+        ax_right.set_xlabel("PnL")
+        ax_right.set_ylabel("Frequency")
+        ax_right.grid(True, alpha=0.25)
+        ax_right.legend()
+
+        plt.tight_layout()
+        plt.show()
