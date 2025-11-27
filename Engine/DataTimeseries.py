@@ -51,18 +51,22 @@ class DataTimeseries:
         """
 
         self._filepath: str = filepath
-        self.symbol = symbol.upper()
-        self.symbol_len = len(symbol)
+        self.symbol: str = symbol.upper()
+        self.symbol_len: int = len(symbol)
         self.timezone: str = None
         self.timeframe: str = '1min'
         self.valid_contract_pattern = f"^{self.symbol}[{self.MONTH_CODES}][0-9]$"
 
-        self.df: pd.DataFrame = self._load_data()
+        self.indicies: pd.DatetimeIndex = None
+        self.ohlc: np.ndarray = None
+        self.volume: np.ndarray = None
+
+        self._load_data()
 
     def __repr__(self) -> str:
-        return self.df.to_string()
+        return self.get_dataframe().head().to_string()
 
-    def _load_data(self) -> pd.DataFrame:
+    def _load_data(self) -> None:
         print(f'\nLoading {self._filepath}')
         df: pd.DataFrame = pd.read_csv(self._filepath, low_memory=True)
 
@@ -94,28 +98,33 @@ class DataTimeseries:
         print(f'Timeframe: {self.timeframe}')
         print(f"Loaded {len(df):,} clean rows\n")
 
-        return df
+        self.indicies = df.index
+        self.ohlc = df[['Open', 'High', 'Low', 'Close']].values
+        self.volume = df[['Volume']].values
 
     def convert_timezone(self, timezone: str):
         assert timezone in self.TIMEZONES, f"Invalid timezone '{timezone}'"
 
         self.timezone = timezone
-        self.df.index = self.df.index.tz_convert(timezone)
+        self.indicies = self.indicies.tz_convert(timezone)
 
     def find_gaps(self) -> pd.DatetimeIndex:
-        start_time: pd.Timestamp = self.df.index[0]
-        end_time: pd.Timestamp = self.df.index[-1]
+        # start_time: pd.Timestamp = self.df.index[0]
+        # end_time: pd.Timestamp = self.df.index[-1]
 
-        no_gaps: pd.DatetimeIndex = pd.date_range(
-            start=start_time, end=end_time, freq=self.timeframe)
-        missing: pd.DatetimeIndex = no_gaps.difference(self.df.index)
+        # no_gaps: pd.DatetimeIndex = pd.date_range(
+        #     start=start_time, end=end_time, freq=self.timeframe)
+        # missing: pd.DatetimeIndex = no_gaps.difference(self.df.index)
 
-        return missing
+        pass
 
-    def get_resampled_data(self, timeframe: str) -> pd.DataFrame:
+    def resample_data(self, timeframe: str) -> None:
         assert timeframe in self.TIMEFRAMES, f'Invalid resampling timeframe: "{timeframe}"'
 
-        self.df = self.df.resample(timeframe, label='right', closed='left').agg({
+        # --- 1. CONVERT BACK TO TEMPORARY PANDAS DATAFRAME ---
+        # The index (self.indicies) is necessary for resampling
+        temp_df = self.get_dataframe()
+        temp_df = temp_df.resample(timeframe, label='right', closed='left').agg({
             'Open': 'first',
             'High': 'max',
             'Low': 'min',
@@ -124,130 +133,137 @@ class DataTimeseries:
         }).dropna()
 
         self.timeframe = timeframe
+        self.indicies = temp_df.index
+        self.ohlc = temp_df[['Open', 'High', 'Low', 'Close']].values
+        self.volume = temp_df[['Volume']].values
 
-        return self.df
+    def get_indicies(self) -> pd.DatetimeIndex:
+        return self.indicies
 
-    def get_close_prices(self, start: pd.Timestamp = None, end: pd.Timestamp = None) -> pd.Series:
-        if start is not None and start not in self.df.index:
-            raise ValueError(f"Start index {start} is not valid.")
-        if end is not None and end not in self.df.index:
-            raise ValueError(f"End index {end} is not valid.")
+    def get_close_prices(self) -> np.ndarray:
+        return self.ohlc[:, 3]
 
-        if start is None and end is None:
-            return self.df['Close']
+    def get_close_prices_series(self) -> pd.Series:
+        return pd.Series(self.get_close_prices(), index=self.indicies)
 
-        return self.df.loc[start:end, 'Close']
+    def get_ohlc_prices(self) -> np.ndarray:
+        return self.ohlc
 
     def get_start_date(self) -> pd.Timestamp:
-        return self.df.index[0]
+        return self.indicies[0]
 
     def get_end_date(self) -> pd.Timestamp:
-        return self.df.index[-1]
+        return self.indicies[-1]
 
-    def get_raw_data(self) -> pd.DataFrame:
-        return self.df
+    def get_dataframe(self) -> pd.DataFrame:
+        df = pd.DataFrame(
+            self.ohlc,
+            index=self.indicies,
+            columns=['Open', 'High', 'Low', 'Close']
+        )
+        df['Volume'] = self.volume
 
-    def get_dates(self) -> pd.DatetimeIndex:
-        return self.df.index
+        return df
 
     def get_timeframe(self) -> str:
         return self.timeframe
 
     @staticmethod
-    def generate_permuted_price_series(price_timeseries: pd.DataFrame) -> pd.Series:
+    def generate_permuted_close_prices(close_prices: np.ndarray) -> np.ndarray:
         """
         Permutes returns (NOT prices) to create a randomized price path
         with identical return distribution but no market structure.
         """
-        close = price_timeseries['Close'].copy()
-        log_returns = np.log(close).diff().fillna(0)
-
-        # Shuffle returns
-        shuffled_returns = np.random.permutation(log_returns.values)
+        log_returns = np.diff(np.log(close_prices))
+        log_returns_padded = np.insert(log_returns, 0, 0.0)
+        shuffled_returns = np.random.permutation(log_returns_padded)
 
         # Convert back to synthetic price series
-        permuted_prices = pd.Series(
-            close.iloc[0] * np.exp(np.cumsum(shuffled_returns)),
-            index=log_returns.index
-        )
+        rescaled_returns = close_prices[0] * \
+            np.exp(np.cumsum(shuffled_returns))
 
-        return permuted_prices
+        return rescaled_returns
+
+    @staticmethod
+    def generate_permuted_close_series(close_prices: np.ndarray, indicies: pd.DatetimeIndex) -> pd.Series:
+        return pd.Series(DataTimeseries.generate_permuted_close_prices(close_prices), index=indicies)
 
     def generate_permuted_ohlc_series(self) -> pd.DataFrame:
-        """
-        Generates a single permuted OHLC price series using shuffling and stitching.
+        # """
+        # Generates a single permuted OHLC price series using shuffling and stitching.
 
-        The process:
-        1. Calculate bar ratios relative to the previous Close (inter-bar shift)
-           and relative to the Open (intra-bar shape).
-        2. Shuffle the vector of bar ratios.
-        3. Reconstitute the price series by applying the shuffled ratios sequentially.
+        # The process:
+        # 1. Calculate bar ratios relative to the previous Close (inter-bar shift)
+        #    and relative to the Open (intra-bar shape).
+        # 2. Shuffle the vector of bar ratios.
+        # 3. Reconstitute the price series by applying the shuffled ratios sequentially.
 
-        Returns:
-            A new pandas DataFrame with 'Open', 'High', 'Low', 'Close' in a 
-            randomized time sequence, but maintaining bar integrity.
-        """
-        # --- 1. Calculate Bar Ratios ---
-        # Calculate the inter-bar return (the shift/gap)
-        # This is the Open of the current bar relative to the Close of the previous bar.
-        prev_close = self.df['Close'].shift(1)
-        # Use the first bar's Close as the starting point for the first Open calculation
-        prev_close.iloc[0] = self.df['Close'].iloc[0]
+        # Returns:
+        #     A new pandas DataFrame with 'Open', 'High', 'Low', 'Close' in a
+        #     randomized time sequence, but maintaining bar integrity.
+        # """
+        # # --- 1. Calculate Bar Ratios ---
+        # # Calculate the inter-bar return (the shift/gap)
+        # # This is the Open of the current bar relative to the Close of the previous bar.
+        # prev_close = self.df['Close'].shift(1)
+        # # Use the first bar's Close as the starting point for the first Open calculation
+        # prev_close.iloc[0] = self.df['Close'].iloc[0]
 
-        # Ratios that define the bar shape and shift
-        ratios_df = pd.DataFrame(index=self.df.index)
+        # # Ratios that define the bar shape and shift
+        # ratios_df = pd.DataFrame(index=self.df.index)
 
-        # R_shift: The shift from the previous close to the current open
-        ratios_df['R_shift'] = self.df['Open'] / prev_close
+        # # R_shift: The shift from the previous close to the current open
+        # ratios_df['R_shift'] = self.df['Open'] / prev_close
 
-        # Intra-bar ratios (defining the shape relative to the Open)
-        ratios_df['R_high'] = self.df['High'] / self.df['Open']
-        ratios_df['R_low'] = self.df['Low'] / self.df['Open']
-        ratios_df['R_close'] = self.df['Close'] / self.df['Open']
+        # # Intra-bar ratios (defining the shape relative to the Open)
+        # ratios_df['R_high'] = self.df['High'] / self.df['Open']
+        # ratios_df['R_low'] = self.df['Low'] / self.df['Open']
+        # ratios_df['R_close'] = self.df['Close'] / self.df['Open']
 
-        # Drop the first row which contains the initial Close price used for initialization
-        ratios_to_shuffle = ratios_df.iloc[1:]
+        # # Drop the first row which contains the initial Close price used for initialization
+        # ratios_to_shuffle = ratios_df.iloc[1:]
 
-        # --- 2. Shuffle the Ratios (Permute the Bars) ---
-        # Shuffle the rows of the ratio DataFrame. This destroys the temporal correlation
-        # but keeps the OHLC-ratio structure of each bar intact.
-        shuffled_indices = np.random.permutation(ratios_to_shuffle.index)
-        shuffled_ratios = ratios_to_shuffle.loc[shuffled_indices].reset_index(
-            drop=True)
+        # # --- 2. Shuffle the Ratios (Permute the Bars) ---
+        # # Shuffle the rows of the ratio DataFrame. This destroys the temporal correlation
+        # # but keeps the OHLC-ratio structure of each bar intact.
+        # shuffled_indices = np.random.permutation(ratios_to_shuffle.index)
+        # shuffled_ratios = ratios_to_shuffle.loc[shuffled_indices].reset_index(
+        #     drop=True)
 
-        # --- 3. Reconstitute the Permuted Price Series (Stitching) ---
-        permuted_prices = pd.DataFrame(index=self.df.index)
+        # # --- 3. Reconstitute the Permuted Price Series (Stitching) ---
+        # permuted_prices = pd.DataFrame(index=self.df.index)
 
-        # Initialize the series with the first actual bar's prices
-        initial_bar = self.df.iloc[0]
-        permuted_prices.loc[self.df.index[0]
-                            ] = initial_bar[['Open', 'High', 'Low', 'Close']]
+        # # Initialize the series with the first actual bar's prices
+        # initial_bar = self.df.iloc[0]
+        # permuted_prices.loc[self.df.index[0]
+        #                     ] = initial_bar[['Open', 'High', 'Low', 'Close']]
 
-        # The initial price for the iterative calculation is the first bar's actual close
-        current_close = initial_bar['Close']
+        # # The initial price for the iterative calculation is the first bar's actual close
+        # current_close = initial_bar['Close']
 
-        for i in range(len(shuffled_ratios)):
-            # Get the permuted ratios for the current step (bar)
-            bar_ratios = shuffled_ratios.iloc[i]
+        # for i in range(len(shuffled_ratios)):
+        #     # Get the permuted ratios for the current step (bar)
+        #     bar_ratios = shuffled_ratios.iloc[i]
 
-            # --- STITCHING: Calculate the current Open based on the previous Close ---
-            # This applies the permuted shift (R_shift) to the last calculated Close price.
-            permuted_open = current_close * bar_ratios['R_shift']
+        #     # --- STITCHING: Calculate the current Open based on the previous Close ---
+        #     # This applies the permuted shift (R_shift) to the last calculated Close price.
+        #     permuted_open = current_close * bar_ratios['R_shift']
 
-            # Calculate the rest of the OHLC bar based on its permuted shape (relative to the new Open)
-            permuted_high = permuted_open * bar_ratios['R_high']
-            permuted_low = permuted_open * bar_ratios['R_low']
-            permuted_close = permuted_open * bar_ratios['R_close']
+        #     # Calculate the rest of the OHLC bar based on its permuted shape (relative to the new Open)
+        #     permuted_high = permuted_open * bar_ratios['R_high']
+        #     permuted_low = permuted_open * bar_ratios['R_low']
+        #     permuted_close = permuted_open * bar_ratios['R_close']
 
-            # Store the new bar in the correct chronological spot (using the original index)
-            # The index itself is just for labeling; the prices are temporally scrambled.
-            current_index = self.df.index[i + 1]
-            permuted_prices.loc[current_index] = [
-                permuted_open, permuted_high, permuted_low, permuted_close
-            ]
+        #     # Store the new bar in the correct chronological spot (using the original index)
+        #     # The index itself is just for labeling; the prices are temporally scrambled.
+        #     current_index = self.df.index[i + 1]
+        #     permuted_prices.loc[current_index] = [
+        #         permuted_open, permuted_high, permuted_low, permuted_close
+        #     ]
 
-            # Update the starting point for the next iteration
-            current_close = permuted_close
+        #     # Update the starting point for the next iteration
+        #     current_close = permuted_close
 
-        # Round to avoid excessive floating point noise
-        return permuted_prices.round(5)
+        # # Round to avoid excessive floating point noise
+        # return permuted_prices.round(5)
+        pass

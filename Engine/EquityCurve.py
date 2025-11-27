@@ -6,17 +6,27 @@ import numpy as np
 
 
 class EquityCurve:
-    def __init__(self, equity_curve: pd.Series, drawdown_curve: pd.Series, trade_indicies: pd.Series, start_date: pd.Timestamp = None, end_date: pd.Timestamp = None):
+    def __init__(self, equity_curve: np.ndarray, drawdown_curve: np.ndarray, trade_indicies: np.ndarray, indicies: pd.DatetimeIndex, start_date: pd.Timestamp = None, end_date: pd.Timestamp = None):
         if len(equity_curve) != len(trade_indicies):
             raise ValueError(
                 "Length of equity_curve != length of trade_indicies.")
 
-        self.start_date = start_date if start_date else equity_curve.index[0]
-        self.end_date = end_date if end_date else equity_curve.index[-1]
+        # 1. Create a temporary full Series for equity and drawdown
+        equity_series = pd.Series(equity_curve, index=indicies)
+        drawdown_series = pd.Series(drawdown_curve, index=indicies)
+        trade_indicies_series = pd.Series(trade_indicies, index=indicies)
 
-        self.trade_indicies: pd.Series = trade_indicies.loc[self.start_date: self.end_date]
-        self.equity_values: pd.Series = equity_curve.loc[self.start_date: self.end_date]
-        self.drawdown_curve: pd.Series = drawdown_curve.loc[self.start_date: self.end_date]
+        # 2. Determine the start and end dates
+        # Use the provided dates or the limits of the index
+        self.start_date: pd.Timestamp = start_date if start_date is not None else indicies[0]
+        self.end_date: pd.Timestamp = end_date if end_date is not None else indicies[-1]
+
+        # 3. Apply slicing using the correct Pandas .loc[] method
+        self.trade_indicies: pd.Series = trade_indicies_series.loc[self.start_date: self.end_date]
+        self.equity_values: pd.Series = equity_series.loc[self.start_date: self.end_date]
+        self.drawdown_curve: pd.Series = drawdown_series.loc[self.start_date: self.end_date]
+
+        # 4. Final Dates Index
         self.dates: pd.DatetimeIndex = self.equity_values.index
 
     def plot(self, label: str = "Equity Curve", ax: plt.Figure = None, show_drawdown: bool = False):

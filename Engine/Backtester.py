@@ -5,8 +5,7 @@ import matplotlib.pyplot as plt
 from Engine.DataTimeseries import DataTimeseries
 from Engine.EquityCurve import EquityCurve
 from Engine.PnLDistribution import SkewCurve
-from Engine.Utils import dollar_format, percentage_format, number_format, confidence_interval, bars_per_year, p_value_one_tailed
-from Engine.MonteCarloSimulation import pnl_resampling_test
+from Engine.Utils import dollar_format, percentage_format, number_format, confidence_interval, bars_per_year, p_value_one_tailed, get_max_consecutive_streak
 
 # equity curves
 # trade win distribution, skew analysis
@@ -18,14 +17,27 @@ from Engine.MonteCarloSimulation import pnl_resampling_test
 
 class Backtester:
 
-    def __init__(self, price_timeseries: pd.DataFrame, timeframe: str, signal: pd.Series, tick_value: float, contract_multiplier: float, initial_equity: float = 100_000, slippage_ticks: float = 0, commission: float = 0):
+    def __init__(
+            self,
+            ohlc: np.ndarray,
+            indicies: pd.DatetimeIndex,
+            signal: np.ndarray,
+            timeframe: str,
+            tick_value: float,
+            contract_multiplier: float,
+            initial_equity: float = 100_000,
+            slippage_ticks: float = 0,
+            commission: float = 0
+    ):
         # DataTimeseries initialization, closing prices, start, end
-        self.price_timeseries: pd.DataFrame = price_timeseries
+        self.ohlc: np.ndarray = ohlc
+        self.indicies: pd.DatetimeIndex = indicies
         self.timeframe: str = timeframe
-        self.close_prices: pd.Series = self.price_timeseries['Close']
-        self.start_date: pd.Timestamp = self.price_timeseries.index[0]
-        self.end_date: pd.Timestamp = self.price_timeseries.index[-1]
-        self.duration: pd.Timedelta = self.end_date - self.start_date
+        self.close_prices: np.ndarray = self.ohlc[:,
+                                                  3] if ohlc.ndim == 2 else self.ohlc
+        self.start_date: pd.Timestamp = indicies[0]
+        self.end_date: pd.Timestamp = indicies[-1]
+        self.duration: pd.Timestamp = self.end_date - self.start_date
 
         # Backtesting hyperparameter metrics
         self.tick_value: float = tick_value  # dollar equivalent for 1 tick move
@@ -38,15 +50,16 @@ class Backtester:
         self.end_equity: float = None
 
         # Signal metrics
-        self.signal: pd.Series = signal
-        self.trade_indicies: pd.Series = self.signal.diff().abs().fillna(0)
+        self.signal: np.ndarray = signal
+        self.trade_indicies: np.ndarray = np.insert(
+            np.abs(np.diff(self.signal)), 0, 0.0)
 
         # Return metrics
-        self.trade_pnl: pd.Series = None  # PnL of each candle
-        self.cum_trade_pnl: pd.Series = None  # cumulative PnL
-        self.equity_curve: pd.Series = None  # dollar equity curve
-        self.drawdown_curve: pd.Series = None  # dollar amounts
-        self.transaction_costs: pd.Series = None  # transaction costs per bar
+        self.trade_pnl: np.ndarray = None  # PnL of each candle
+        self.cum_trade_pnl: np.ndarray = None  # cumulative PnL
+        self.equity_curve: np.ndarray = None  # dollar equity curve
+        self.drawdown_curve: np.ndarray = None  # dollar amounts
+        self.transaction_costs: np.ndarray = None  # transaction costs per bar
 
         self.total_pct_return: float = None  # (PnL ÷ initial equity)
         self.total_pnl: float = None  # Total PnL in dollars
@@ -105,7 +118,6 @@ class Backtester:
         Ratio Win/Loss:   {number_format(self.ratio_avg_win_loss)}
         Expected Value:   {dollar_format(self.expected_value)}
 
-
         Largest Win:      {dollar_format(self.largest_win)}
         Largest Loss:     {dollar_format(self.largest_loss)}
         Max Consec. Wins: {self.max_consec_wins}
@@ -144,55 +156,64 @@ class Backtester:
                 f"Signal length must match the length of close prices. {len(self.signal)} != {len(self.close_prices)}")
 
         # Handle NaN values introduced by shift
-        index = self.close_prices.index
-        position = self.signal.shift(1).fillna(0)
-        price_diff = self.close_prices.diff().fillna(0)
+        position = np.roll(self.signal, 1)
+        position[0] = 0.0
+        price_diff = np.insert(np.diff(self.close_prices), 0, 0.0)
 
-        raw_pnl: pd.Series = position * price_diff * self.contract_multiplier
-        commision_cost: pd.Series = self.trade_indicies * self.commission
-        slippage_cost: pd.Series = self.trade_indicies * self.slippage_ticks * \
+        raw_pnl: np.ndarray = position * price_diff * self.contract_multiplier
+        commision_cost: np.ndarray = self.trade_indicies * self.commission
+        slippage_cost: np.ndarray = self.trade_indicies * self.slippage_ticks * \
             self.tick_value * self.contract_multiplier
 
-        self.transaction_costs: pd.Series = commision_cost + slippage_cost
-        self.trade_pnl: pd.Series = raw_pnl - self.transaction_costs
-        self.cum_trade_pnl: pd.Series = self.trade_pnl.cumsum()
-        self.equity_curve: pd.Series = self.initial_equity + self.cum_trade_pnl
+        self.transaction_costs: np.ndarray = commision_cost + slippage_cost
+        self.trade_pnl: np.ndarray = raw_pnl - self.transaction_costs
+        self.cum_trade_pnl: np.ndarray = self.trade_pnl.cumsum()
+        self.equity_curve: np.ndarray = self.initial_equity + self.cum_trade_pnl
 
-        self.end_equity = self.equity_curve.iloc[-1]
-        self.total_pnl = self.initial_equity + self.cum_trade_pnl.iloc[-1]
+        self.end_equity = self.equity_curve[-1]
+        self.total_pnl = self.initial_equity + self.cum_trade_pnl[-1]
         self.total_pct_return = self.total_pnl / self.initial_equity - 1
 
     def calculate_raw_buy_hold_return(self) -> float:
-        return self.close_prices.iloc[-1] / self.close_prices.iloc[0] - 1
+        return self.close_prices[-1] / self.close_prices[0] - 1
 
     def generate_equity_curve(self) -> EquityCurve:
-        return EquityCurve(self.equity_curve, self.drawdown_curve, self.trade_indicies)
+        return EquityCurve(self.equity_curve, self.drawdown_curve, self.trade_indicies, self.indicies)
 
     def generate_buy_hold_equity_curve(self) -> EquityCurve:
-        shares: float = self.initial_equity / self.close_prices.iloc[0]
-        equity_curve: pd.Series = shares * self.close_prices
-        drawdown_curve: pd.Series = equity_curve - equity_curve.cummax()
+        shares: float = self.initial_equity / self.close_prices[0]
+        equity_curve: np.ndarray = shares * self.close_prices
+        drawdown_curve: np.ndarray = equity_curve - \
+            np.maximum.accumulate(equity_curve)
 
-        return EquityCurve(equity_curve, drawdown_curve, self.trade_indicies)
+        return EquityCurve(equity_curve, drawdown_curve, self.trade_indicies, self.indicies)
 
     def generate_skew_curve(self) -> SkewCurve:
         return SkewCurve(self.trade_pnl, self.trade_indicies, self.initial_equity)
 
     def calculate_drawdown_metrics(self):
-        equity_max: pd.Series = self.equity_curve.cummax()
+        equity_max: np.ndarray = np.maximum.accumulate(self.equity_curve)
 
         self.drawdown_curve = self.equity_curve - equity_max
         self.max_drawdown = self.drawdown_curve.min()  # most negative value
         self.max_drawdown_pct = self.max_drawdown / self.equity_curve.max()
 
-        self.max_drawdown_end = self.drawdown_curve.idxmin()
-        self.max_drawdown_start = self.equity_curve[:self.max_drawdown_end].idxmax(
-        )
-        self.max_drawdown_duration = self.max_drawdown_end - self.max_drawdown_start
+        end_index_location: int = np.argmin(self.drawdown_curve)
+
+        # Find the array index (position) of the preceding peak
+        # The peak is the maximum equity *before* the drawdown ended.
+        start_index_location: int = np.argmax(
+            self.equity_curve[:end_index_location])
+
+        self.max_drawdown_duration = self.indicies[end_index_location] - \
+            self.indicies[start_index_location]
 
     def calculate_winlose_metrics(self):
-        trade_groups = self.trade_indicies.cumsum()
-        trade_returns = self.trade_pnl.groupby(trade_groups).sum()
+        trade_pnl_series: pd.Series = pd.Series(self.trade_pnl)
+        trade_groups: np.ndarray = self.trade_indicies.cumsum()
+        trade_returns: pd.Series = trade_pnl_series.groupby(trade_groups).sum()
+        trade_returns: np.ndarray = trade_returns.values
+
         winning_trades = trade_returns[trade_returns > 0]
         losing_trades = trade_returns[trade_returns < 0]
 
@@ -203,41 +224,14 @@ class Backtester:
 
         self.average_win = winning_trades.sum() / self.winning_trades
         self.average_loss = losing_trades.sum() / self.losing_trades
-        self.ratio_avg_win_loss = self.average_win / \
-            self.average_loss * -1  # flip positive
+        self.ratio_avg_win_loss = self.average_win / -self.average_loss  # flip positive
 
-        # trade_groups = self.trade_indicies.cumsum()
-
-        # first index of each trade group
-        # trade_start_index = trade_groups[trade_groups.diff().fillna(1) == 1]
-
-        # # the direction taken at the start of each trade
-        # trade_directions = self.signal.loc[trade_start_index.index]
-
-        # # trade_returns has index = trade group numbers (0,1,2,3,...)
-        # # so map group_number → direction
-        # trade_directions.index = trade_start_index.values   # assign group numbers as index
-        # trade_directions = trade_directions.reindex(
-        #     trade_returns.index)  # align to trade_returns
-
-        # long_returns = trade_returns[trade_directions > 0]
-        # short_returns = trade_returns[trade_directions < 0]
-
-        # self.long_trades_won = (long_returns > 0).sum()
-        # self.short_trades_won = (short_returns > 0).sum()
-
-        # self.long_trades_winrate = self.long_trades_won / \
-        #     len(long_returns) if len(long_returns) > 0 else 0
-        # self.short_trades_winrate = self.short_trades_won / \
-        #     len(short_returns) if len(short_returns) > 0 else 0
+        # !todo missing calculation for the number of winning long trades vs winning short trades
+        # !todo hard todo because you have to pair the signal to the returns
 
         # overwrite trade_returns to comput max consecutive
-        trade_returns[trade_returns > 0] = 1
-        trade_returns[trade_returns < 0] = -1
-        self.max_consec_wins = trade_returns.groupby(
-            (trade_returns != 1).cumsum()).transform('size')[trade_returns == 1].max()
-        self.max_consec_losses = trade_returns.groupby(
-            (trade_returns != -1).cumsum()).transform('size')[trade_returns == -1].max()
+        self.max_consec_wins = get_max_consecutive_streak(winning_trades)
+        self.max_consec_losses = get_max_consecutive_streak(losing_trades)
 
         self.largest_win = winning_trades.max()
         self.largest_loss = losing_trades.min()
@@ -292,11 +286,67 @@ class Backtester:
 
     def monte_carlo_pnl_resampling_test(self, iterations: int = 1000, pct_of_trades: float = 1):
         trade_groups = self.trade_indicies.cumsum()
-        per_trade_pnl: np.ndarray = self.trade_pnl.groupby(
+        trade_returns: np.ndarray = pd.Series(self.trade_pnl).groupby(
             trade_groups).sum().values
 
-        pnl_resampling_test(per_trade_pnl, iterations,
-                            pct_of_trades=pct_of_trades)
+        n_trades = len(trade_returns)
+        step = int(1 / pct_of_trades)
+        x = np.arange(0, n_trades, step)
+
+        plt.figure(figsize=(12, 6))
+
+        # Original strategy
+        original_equity = trade_returns.cumsum()
+        original_drawdown = (
+            original_equity - np.maximum.accumulate(original_equity)).min()
+
+        # Initialize best and worst trackers
+        best_equity = None
+        best_drawdown = -np.inf
+        worst_equity = None
+        worst_drawdown = 0  # negative drawdown
+        drawdowns = []
+
+        for _ in range(iterations):
+            shuffled = np.random.permutation(trade_returns)
+            equity_curve = shuffled.cumsum()
+            drawdown = (equity_curve -
+                        np.maximum.accumulate(equity_curve)).min()
+            drawdowns.append(drawdown)
+
+            # Update worst
+            if drawdown < worst_drawdown:
+                worst_drawdown = drawdown
+                worst_equity = equity_curve.copy()
+
+            # Update best
+            if drawdown > best_drawdown:
+                best_drawdown = drawdown
+                best_equity = equity_curve.copy()
+
+            plt.plot(x, equity_curve[x], linewidth=0.8,
+                     alpha=0.5, color='gray')
+
+        # Plot original strategy in black
+        plt.plot(x, original_equity[x], color='black',
+                 linewidth=1.5, label=f'Original Drawdown: {dollar_format(original_drawdown)}')
+
+        # Plot worst drawdown in red
+        plt.plot(x, worst_equity[x], color='red',
+                 linewidth=1.5, label=f'Worst Drawdown: {dollar_format(worst_drawdown)}')
+
+        # Plot best drawdown in blue
+        plt.plot(x, best_equity[x], color='blue',
+                 linewidth=1.5, label=f'Best Drawdown: {dollar_format(best_drawdown)}')
+
+        plt.title(
+            f"Monte Carlo PnL Resampling Test (showing every {step} bars)\n Avg. Drawdown: {dollar_format(np.array(drawdowns).mean())}")
+        plt.xlabel("Trades")
+        plt.ylabel("Returns")
+        plt.grid(True, alpha=0.25)
+        plt.tight_layout()
+        plt.legend()
+        plt.show()
 
     def monte_carlo_permutation_test(self, iterations: int = 1000, pct_of_trades: float = 1, title: str = ''):
         null_hypothesis = self.total_pnl
@@ -314,13 +364,13 @@ class Backtester:
 
         for i in range(iterations):
             print(i)
-            permuted_series: pd.Series = DataTimeseries.generate_permuted_price_series(
-                self.price_timeseries)
-            permuted_dataframe = permuted_series.to_frame(name='Close')
+            permuted_close_prices: np.ndarray = DataTimeseries.generate_permuted_close_prices(
+                self.close_prices)
             bt = Backtester(
-                permuted_dataframe,
-                self.timeframe,
+                permuted_close_prices,
+                self.indicies,
                 self.signal,
+                self.timeframe,
                 self.tick_value,
                 self.contract_multiplier,
                 self.initial_equity,
@@ -331,16 +381,15 @@ class Backtester:
 
             permutation_returns.append(bt.total_pnl)
 
-            equity_curve = bt.equity_curve[mask]
             ax_left.plot(
-                equity_curve.index,
-                equity_curve.values,
+                bt.indicies[mask],
+                bt.equity_curve[mask],
                 linewidth=0.8,
                 color='gray'
             )
 
         # plot original equity curve
-        ax_left.plot(self.equity_curve[mask].index, self.equity_curve[mask].values,
+        ax_left.plot(self.indicies[mask], self.equity_curve[mask],
                      linewidth=1, color='blue')
 
         ax_left.set_title(

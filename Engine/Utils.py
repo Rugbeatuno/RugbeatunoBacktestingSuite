@@ -2,6 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.stats import binomtest, norm
 from math import sqrt
+import numpy as np
 
 
 def dollar_format(value: float) -> str:
@@ -129,3 +130,37 @@ def p_value_one_tailed(mean: float, std: float, observed: float, tail="right") -
 
     else:
         raise ValueError("tail must be 'right' or 'left'")
+
+
+def get_max_consecutive_streak(arr: np.ndarray) -> int:
+    """
+    Finds the maximum number of consecutive identical values in a 1D NumPy array.
+
+    Example: [1, 1, 1, 2, 2, 3, 4, 4, 4, 4, 4, 2, 4, 4] -> returns 5 (for the 4s)
+    """
+    if arr.size == 0:
+        return 0
+    if arr.size == 1:
+        return 1
+
+    # 1. Identify where the array values change
+    # np.diff(arr) != 0 returns a boolean array (True at change points).
+    # np.nonzero gets the indices of those True values.
+    change_indices = np.nonzero(np.diff(arr))[0]
+    # For arr, this is: array([ 2, 4, 5, 10, 11])
+
+    # 2. Define the boundaries of all consecutive blocks
+    # np.r_ combines the start index (0), the indices *after* the change points (+1),
+    # and the final index (arr.shape[0], which is 14 for the example).
+    boundaries = np.r_[0, change_indices + 1, arr.shape[0]]
+    # For arr, this is: array([ 0, 3, 5, 6, 11, 12, 14])
+
+    # 3. Calculate the length (duration) of each block
+    # np.diff calculates the difference between adjacent boundaries.
+    run_lengths = np.diff(boundaries)
+    # For arr, this is: array([3, 2, 1, 5, 1, 2])
+
+    # 4. Find the maximum length
+    max_streak = np.max(run_lengths)
+
+    return max_streak

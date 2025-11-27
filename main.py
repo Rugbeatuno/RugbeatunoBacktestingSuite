@@ -15,10 +15,9 @@ EMSD_LONG_WEIGHT = 0.3
 EMSD_SHORT_LENGTH = 64
 EMSD_LONG_LENGTH = 256
 
-data_timeseries = DataTimeseries('./Data/nq_continous.csv', 'NQ')
+data = DataTimeseries('./Data/nq_continous.csv', 'NQ')
 # m5_resampled = data_timeseries.get_resampled_data('1D')
-close: pd.Series = data_timeseries.get_close_prices()
-print(close)
+close: pd.Series = data.get_close_prices_series()
 
 # # N and 4N pairs
 ema_8 = ta.ema(close, 8)
@@ -100,15 +99,28 @@ signal[combined_forecast > w4] = 1
 signal[combined_forecast < -w4] = -1
 signal_series = pd.Series(signal, index=df.index)
 
-backtester = Backtester(data_timeseries.get_raw_data(), data_timeseries.get_timeframe(), signal_series,
-                        tick_value=0.5, contract_multiplier=2, slippage_ticks=0)
+backtester = Backtester(
+    data.get_ohlc_prices(),
+    data.indicies,
+    signal_series.values,
+    timeframe='1min',
+    tick_value=0.25,
+    contract_multiplier=2.0,
+    initial_equity=100_000,
+    slippage_ticks=0,
+    commission=0
+
+)
+
 backtester.full_backtest()
 
 print(backtester)
 
-# permuted_series = data_timeseries.generate_permuted_price_series()
+# permuted_series = DataTimeseries.generate_permuted_close_series(
+#     data.get_close_prices(), data.get_indicies())
 # plot_price_series([permuted_series, close], [
 #                   'permuted', 'std'], pct_of_bars=0.2)
+
 # plot_price_series([close], ['close'], pct_of_bars=.2)
 
 # strategy_ret = backtester.generate_equity_curve()
@@ -121,5 +133,5 @@ print(backtester)
 #     [strategy_ret, bh_ret], ["Strategy", "Buy & Hold"])
 
 # backtester.generate_skew_curve().plot()
-# backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.05)
+backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.05)
 backtester.monte_carlo_permutation_test(100, 0.01, 'Walk Forward')

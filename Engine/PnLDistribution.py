@@ -7,17 +7,18 @@ from Engine.Utils import dollar_format
 
 class SkewCurve:
 
-    def __init__(self, trade_curve: pd.Series, trade_indicies: pd.Series, intital_equity: float = 100_000):
-        self.trade_curve: pd.Series = trade_curve
-        self.trade_indicies: pd.Series = trade_indicies
+    def __init__(self, trade_curve: np.ndarray, trade_indicies: np.ndarray, intital_equity: float = 100_000):
+        self.trade_curve: np.ndarray = trade_curve
+        self.trade_indicies: np.ndarray = trade_indicies
         self.initial_equity: float = intital_equity
 
         # 0 0 0 0 1 0 0 0 1
         # 0 0 0 0 1 1 1 1 2
-        self.trade_groups: pd.Series = self.trade_indicies.cumsum()
-        self.trade_returns = self.trade_curve.groupby(
-            self.trade_groups).cumsum()
-        self.trade_pct_returns = self.trade_returns / intital_equity * 100
+        trade_pnl_series = pd.Series(self.trade_curve)
+        trade_groups: np.ndarray = self.trade_indicies.cumsum()
+        self.trade_returns: pd.Series = trade_pnl_series.groupby(
+            trade_groups).sum()
+        self.trade_pct_returns: pd.Series = self.trade_returns / self.initial_equity * 100
 
     def plot(self, bins: int = 150):
         data = self.trade_pct_returns.dropna()
@@ -53,23 +54,6 @@ class SkewCurve:
             color='green',
             label="Positive Returns"
         )
-
-        # Normal curve overlay
-        # x = np.linspace(bin_edges[0], bin_edges[-1], 1000)
-        # pdf = norm.pdf(x, mu, sigma)
-
-        # # Convert PDF → histogram units
-        # N = len(data)
-        # bin_width = bin_edges[1] - bin_edges[0]
-        # scaled_pdf = pdf * N * bin_width
-
-        # ax.plot(
-        #     x, scaled_pdf,
-        #     linestyle='dotted',
-        #     linewidth=2,
-        #     color='blue',
-        #     label="Normal PDF (scaled)"
-        # )
 
         # Vertical lines
         ax.axvline(0, color='black', linestyle='-',

@@ -1,7 +1,13 @@
+from Engine.DataTimeseries import DataTimeseries
 
-import pandas as pd
-import numpy as np
-
-signal = pd.Series([1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0])
-print(signal)
-print(signal[signal.ne(signal.shift())])
+data = DataTimeseries('./Data/nq_continous.csv', 'NQ')
+print(data)
+print(data.get_close_prices())
+print(data.get_start_date())
+print(data.get_end_date())
+print(data.get_timeframe())
+print(data.get_indicies())
+print(data.get_ohlc_prices())
+print(data.get_close_prices())
+print(data.resample_data('1D'))
+print(data)
