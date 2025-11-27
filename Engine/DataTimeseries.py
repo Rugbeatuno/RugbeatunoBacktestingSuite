@@ -154,12 +154,13 @@ class DataTimeseries:
     def get_timeframe(self) -> str:
         return self.timeframe
 
-    def generate_permuted_price_series(self) -> pd.Series:
+    @staticmethod
+    def generate_permuted_price_series(price_timeseries: pd.DataFrame) -> pd.Series:
         """
         Permutes returns (NOT prices) to create a randomized price path
         with identical return distribution but no market structure.
         """
-        close = self.df['Close'].copy()
+        close = price_timeseries['Close'].copy()
         log_returns = np.log(close).diff().fillna(0)
 
         # Shuffle returns

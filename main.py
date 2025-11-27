@@ -100,25 +100,25 @@ signal[combined_forecast > w4] = 1
 signal[combined_forecast < -w4] = -1
 signal_series = pd.Series(signal, index=df.index)
 
-backtester = Backtester(data_timeseries, signal_series,
+backtester = Backtester(data_timeseries.get_raw_data(), data_timeseries.get_timeframe(), signal_series,
                         tick_value=0.5, contract_multiplier=2, slippage_ticks=0)
 
 print(backtester)
 
-permuted_series = data_timeseries.generate_permuted_price_series()
-plot_price_series([permuted_series, close], [
-                  'permuted', 'std'], pct_of_bars=0.2)
-plot_price_series([close], ['close'], pct_of_bars=.2)
+# permuted_series = data_timeseries.generate_permuted_price_series()
+# plot_price_series([permuted_series, close], [
+#                   'permuted', 'std'], pct_of_bars=0.2)
+# plot_price_series([close], ['close'], pct_of_bars=.2)
 
-strategy_ret = backtester.generate_equity_curve()
-bh_ret = backtester.generate_buy_hold_equity_curve()
+# strategy_ret = backtester.generate_equity_curve()
+# bh_ret = backtester.generate_buy_hold_equity_curve()
 
-strategy_ret.plot('strategy', show_drawdown=True)
-bh_ret.plot('buy hold', show_drawdown=True)
+# strategy_ret.plot('strategy', show_drawdown=True)
+# bh_ret.plot('buy hold', show_drawdown=True)
 
-EquityCurve.combine_equity_curves(
-    [strategy_ret, bh_ret], ["Strategy", "Buy & Hold"])
+# EquityCurve.combine_equity_curves(
+#     [strategy_ret, bh_ret], ["Strategy", "Buy & Hold"])
 
-backtester.generate_skew_curve().plot()
-backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.05)
+# backtester.generate_skew_curve().plot()
+# backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.05)
 backtester.monte_carlo_permutation_test(1000, 0.01, 'Walk Forward')

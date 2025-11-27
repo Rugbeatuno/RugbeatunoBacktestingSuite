@@ -18,12 +18,13 @@ from Engine.MonteCarloSimulation import pnl_resampling_test
 
 class Backtester:
 
-    def __init__(self, data_timeseries: DataTimeseries, signal: pd.Series, tick_value: float, contract_multiplier: float, initial_equity: float = 100_000, slippage_ticks: float = 0, commission: float = 0):
+    def __init__(self, price_timeseries: pd.DataFrame, timeframe: str, signal: pd.Series, tick_value: float, contract_multiplier: float, initial_equity: float = 100_000, slippage_ticks: float = 0, commission: float = 0):
         # DataTimeseries initialization, closing prices, start, end
-        self.data_timeseries: DataTimeseries = data_timeseries
-        self.close_prices: pd.Series = self.data_timeseries.get_close_prices()
-        self.start_date: pd.Timestamp = self.data_timeseries.get_start_date()
-        self.end_date: pd.Timestamp = self.data_timeseries.get_end_date()
+        self.price_timeseries: pd.DataFrame = price_timeseries
+        self.timeframe: str = timeframe
+        self.close_prices: pd.Series = self.price_timeseries['Close']
+        self.start_date: pd.Timestamp = self.price_timeseries.index[0]
+        self.end_date: pd.Timestamp = self.price_timeseries.index[-1]
         self.duration: pd.Timedelta = self.end_date - self.start_date
 
         # Backtesting hyperparameter metrics
@@ -83,11 +84,6 @@ class Backtester:
         self.sortino_ratio: float = None
         self.profit_factor: float = None
 
-        self.quick_backtest()
-        self.calculate_drawdown_metrics()
-        self.calculate_winlose_metrics()
-        self.calculate_performance_metrics()
-
         self.alpha: float = None
         self.beta: float = None
 
@@ -133,6 +129,12 @@ class Backtester:
         # Long Trades Won:      {self.long_trades_won}
         # Short Trades Winrate: {percentage_format(self.short_trades_winrate)}
         # Long Trades Winrate:  {percentage_format(self.long_trades_winrate)}
+
+    def full_backtest(self) -> None:
+        self.quick_backtest()
+        self.calculate_drawdown_metrics()
+        self.calculate_winlose_metrics()
+        self.calculate_performance_metrics()
 
     def quick_backtest(self) -> None:
         if len(self.signal) != len(self.close_prices):
@@ -248,7 +250,7 @@ class Backtester:
         # 1. Annualization factor from timeframe (bars/year)
         # ----------------------------------------------------
         # USE YOUR DATASERIES TIMEFRAME
-        bars_year = bars_per_year(self.data_timeseries.get_timeframe())
+        bars_year = bars_per_year(self.timeframe)
         # ----------------------------------------------------
         # 2. CAGR (your old version is correct)
         # ----------------------------------------------------
@@ -308,9 +310,13 @@ class Backtester:
         ax_left, ax_right = axes
 
         for i in range(iterations):
-            permuted_series = self.data_timeseries.generate_permuted_price_series()
+            print(i)
+            permuted_series: pd.Series = DataTimeseries.generate_permuted_price_series(
+                self.price_timeseries)
+            permuted_dataframe = permuted_series.to_frame(name='Close')
             bt = Backtester(
-                permuted_series,
+                permuted_dataframe,
+                self.timeframe,
                 self.signal,
                 self.tick_value,
                 self.contract_multiplier,
