@@ -102,6 +102,7 @@ signal_series = pd.Series(signal, index=df.index)
 
 backtester = Backtester(data_timeseries.get_raw_data(), data_timeseries.get_timeframe(), signal_series,
                         tick_value=0.5, contract_multiplier=2, slippage_ticks=0)
+backtester.full_backtest()
 
 print(backtester)
 
@@ -121,4 +122,4 @@ print(backtester)
 
 # backtester.generate_skew_curve().plot()
 # backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.05)
-backtester.monte_carlo_permutation_test(1000, 0.01, 'Walk Forward')
+backtester.monte_carlo_permutation_test(100, 0.01, 'Walk Forward')

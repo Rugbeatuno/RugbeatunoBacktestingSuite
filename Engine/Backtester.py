@@ -68,7 +68,7 @@ class Backtester:
         self.average_loss: float = None
         self.ratio_avg_win_loss: float = None
         self.max_consec_wins: int = None
-        self.max_consec_loses: int = None
+        self.max_consec_losses: int = None
         self.largest_win: float = None
         self.largest_loss: float = None
         self.expected_value: float = None
@@ -136,12 +136,15 @@ class Backtester:
         self.calculate_winlose_metrics()
         self.calculate_performance_metrics()
 
+    # convert all major calculations into numpy then back to pandas
+
     def quick_backtest(self) -> None:
         if len(self.signal) != len(self.close_prices):
             raise ValueError(
                 f"Signal length must match the length of close prices. {len(self.signal)} != {len(self.close_prices)}")
 
         # Handle NaN values introduced by shift
+        index = self.close_prices.index
         position = self.signal.shift(1).fillna(0)
         price_diff = self.close_prices.diff().fillna(0)
 
@@ -324,11 +327,12 @@ class Backtester:
                 self.slippage_ticks,
                 self.commission
             )
+            bt.quick_backtest()
 
             permutation_returns.append(bt.total_pnl)
 
             equity_curve = bt.equity_curve[mask]
-            plt.plot(
+            ax_left.plot(
                 equity_curve.index,
                 equity_curve.values,
                 linewidth=0.8,
@@ -336,12 +340,12 @@ class Backtester:
             )
 
         # plot original equity curve
-        plt.plot(self.equity_curve[mask].index, self.equity_curve[mask].values,
-                 linewidth=1, color='blue')
+        ax_left.plot(self.equity_curve[mask].index, self.equity_curve[mask].values,
+                     linewidth=1, color='blue')
 
         ax_left.set_title(
             f"Monte Carlo {title} Permutation Test (showing every {pct_of_trades} bars)")
-        ax_left.set_xlabel("Trades")
+        ax_left.set_xlabel("Time")
         ax_left.set_ylabel("Returns")
         ax_left.grid(True, alpha=0.25)
         ax_left.legend()
@@ -353,7 +357,7 @@ class Backtester:
 
         p = p_value_one_tailed(mu, std, null_hypothesis, tail='right')
 
-        ax_right.hist(returns_np, bins=40, alpha=0.7, edgecolor='black')
+        ax_right.hist(returns_np, bins=50, alpha=0.7, edgecolor='blue')
         ax_right.axvline(null_hypothesis, color='blue', linewidth=2,
                          label=f'Actual = {null_hypothesis:.2f}')
         ax_right.axvline(mu, color='red', linewidth=1.5,
