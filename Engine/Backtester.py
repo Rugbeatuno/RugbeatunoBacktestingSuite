@@ -142,6 +142,107 @@ class Backtester:
         # Short Trades Winrate: {percentage_format(self.short_trades_winrate)}
         # Long Trades Winrate:  {percentage_format(self.long_trades_winrate)}
 
+    def vectorized_backtest(self, signal_matrix: np.ndarray) -> pd.DataFrame:
+        """
+        Runs a fully vectorized backtest on a matrix of signals.
+
+        Parameters
+        ----------
+        signal_matrix : np.ndarray
+            A 2D array of shape (K, N), where K is the number of
+            parameter combinations (strategies) and N is the number of bars.
+
+        Returns
+        -------
+        pd.DataFrame
+            A DataFrame with K rows, where each row contains the
+            performance metrics for a single strategy.
+        """
+
+        # K = number of strategies (param combinations)
+        # N = number of bars
+        K, N = signal_matrix.shape
+
+        if N != len(self.close_prices):
+            raise ValueError(f"Signal matrix bar dimension ({N}) does not match "
+                             f"Backtester's close prices dimension ({len(self.close_prices)}).")
+
+        # --- 1. Vectorized PnL Calculation ---
+
+        # Price diff is a 1D array (N,)
+        price_diff = np.insert(np.diff(self.close_prices), 0, 0.0)
+
+        # Position matrix (K, N)
+        # Roll along the time axis (axis=1)
+        position_matrix = np.roll(signal_matrix, 1, axis=1)
+        position_matrix[:, 0] = 0.0
+
+        # PnL Matrix (K, N)
+        # Broadcasting: (K, N) * (N,) -> (K, N)
+        raw_pnl_matrix = position_matrix * price_diff * self.contract_multiplier
+
+        # --- 2. Vectorized Costs Calculation ---
+
+        # Trade Indicies Matrix (K, N)
+        trade_indicies_matrix = np.insert(
+            np.abs(np.diff(signal_matrix, axis=1)), 0, 0.0, axis=1)
+
+        commission_cost = trade_indicies_matrix * self.commission
+        slippage_cost = (trade_indicies_matrix * self.slippage_ticks *
+                         self.tick_value * self.contract_multiplier)
+
+        transaction_costs = commission_cost + slippage_cost
+
+        trade_pnl_matrix = raw_pnl_matrix - transaction_costs
+
+        # --- 3. Vectorized Equity & Drawdown ---
+
+        # Equity Curve Matrix (K, N)
+        # Cumsum along the time axis (axis=1)
+        cum_trade_pnl_matrix = np.cumsum(trade_pnl_matrix, axis=1)
+        equity_curve_matrix = self.initial_equity + cum_trade_pnl_matrix
+
+        # Total PnL (K,)
+        total_pnl = equity_curve_matrix[:, -1] - self.initial_equity
+
+        # Max Drawdown (K,)
+        # Use np.maximum.accumulate along the time axis (axis=1)
+        equity_max = np.maximum.accumulate(equity_curve_matrix, axis=1)
+        drawdown_curve = equity_curve_matrix - equity_max
+        max_drawdown = np.min(drawdown_curve, axis=1)  # (K,)
+
+        # --- 4. Vectorized Performance Metrics ---
+
+        # Sharpe Ratio (K,)
+        bar_returns = trade_pnl_matrix / self.initial_equity
+        mean_ret = np.mean(bar_returns, axis=1)
+        std_ret = np.std(bar_returns, axis=1)
+
+        # Handle division by zero
+        sharpe_ratio = np.divide(mean_ret, std_ret,
+                                 out=np.zeros(K, dtype=float), where=std_ret != 0)
+
+        bars_year = bars_per_year(self.timeframe)
+        sharpe_ratio *= np.sqrt(bars_year)
+
+        # Profit Factor (K,)
+        total_gains = np.sum(
+            np.where(trade_pnl_matrix > 0, trade_pnl_matrix, 0), axis=1)
+        total_losses = -np.sum(np.where(trade_pnl_matrix <
+                               0, trade_pnl_matrix, 0), axis=1)
+
+        profit_factor = np.divide(total_gains, total_losses,
+                                  out=np.full(K, np.inf), where=total_losses != 0)
+
+        # --- 5. Assemble Results ---
+        results = {
+            'TotalPnL': total_pnl,
+            'Sharpe': sharpe_ratio,
+            'MaxDrawdown': max_drawdown,
+            'ProfitFactor': profit_factor
+        }
+        return pd.DataFrame(results)
+
     def full_backtest(self) -> None:
         self.quick_backtest()
         self.calculate_drawdown_metrics()

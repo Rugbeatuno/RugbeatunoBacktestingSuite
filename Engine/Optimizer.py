@@ -26,6 +26,11 @@ def Parameter(name: str, min_value: float, max_value: float, step: float):
         self.min_value = min_value
         self.max_value = max_value
         self.step = step
+        self.range = np.arange(
+            self.min_value, self.max_value + step, self.step)
+
+    def __repr__(self) -> str:
+        return f"Parameter(name='{self.name}', range=({self.min_value}, {self.max_value}, {self.step}))"
 
 
 def optimize(price_timeseries: pd.DataFrame,
