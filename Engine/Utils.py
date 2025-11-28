@@ -15,6 +15,8 @@ def dollar_format(value: float) -> str:
     Returns:
         str: The formatted dollar price string.
     """
+    if value is None:
+        return 'None'
     return f"${value:,.2f}"
 
 
@@ -25,10 +27,16 @@ def percentage_format(value: float) -> str:
     Args:
         value (float): The value to format.
     """
+    if value is None:
+        return 'None'
+
     return f'{(100 * value):.2f}%'
 
 
 def number_format(value: float) -> str:
+    if value is None:
+        return 'None'
+
     return f'{value:.2f}'
 
 

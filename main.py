@@ -37,7 +37,8 @@ sync_df = pd.DataFrame({
     'ema32': ema_32,
     'ema64': ema_64,
     'ema256': ema_256,
-}).dropna()
+}).fillna(0)
+
 
 ema_8 = sync_df['ema8']
 ema_16 = sync_df['ema16']
@@ -95,16 +96,18 @@ w4 = 0.02169602541391937
 combined_forecast = np_8_32 * w1 + np_16_64 * w2 + np_64_256 * w3
 combined_forecast = combined_forecast / clip_max
 signal = np.zeros_like(combined_forecast, dtype=np.float32)
-signal[combined_forecast > w4] = 1
-signal[combined_forecast < -w4] = -1
+signal[combined_forecast > w4] = -1
+signal[combined_forecast < -w4] = 1
 signal_series = pd.Series(signal, index=df.index)
 
+# signal_series = pd.Series(np.ones(len(signal)))
+print(len(signal_series))
 backtester = Backtester(
     data.get_ohlc_prices(),
     data.indicies,
     signal_series.values,
     timeframe='1min',
-    tick_value=0.25,
+    tick_value=0.5,
     contract_multiplier=2.0,
     initial_equity=100_000,
     slippage_ticks=0,
@@ -123,15 +126,20 @@ print(backtester)
 
 # plot_price_series([close], ['close'], pct_of_bars=.2)
 
-# strategy_ret = backtester.generate_equity_curve()
+strategy_ret = backtester.generate_equity_curve()
 # bh_ret = backtester.generate_buy_hold_equity_curve()
 
-# strategy_ret.plot('strategy', show_drawdown=True)
+strategy_ret.plot('strategy', show_drawdown=True)
+backtester.generate_skew_curve().plot()
 # bh_ret.plot('buy hold', show_drawdown=True)
 
 # EquityCurve.combine_equity_curves(
 #     [strategy_ret, bh_ret], ["Strategy", "Buy & Hold"])
 
 # backtester.generate_skew_curve().plot()
-backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.05)
-backtester.monte_carlo_permutation_test(100, 0.01, 'Walk Forward')
+# backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.05)
+# backtester.monte_carlo_permutation_test(100, 0.01, 'Walk Forward')
+
+chart = Chart(data.get_ohlc_prices(), data.get_indicies(),
+              signal=signal_series.values, window=300)
+chart.plot_candles()

@@ -29,6 +29,13 @@ class Backtester:
             slippage_ticks: float = 0,
             commission: float = 0
     ):
+
+        assert len(ohlc) == len(
+            signal), "OHLC data and signal length must match."
+        assert len(indicies) == len(
+            ohlc), "Indicies length must match OHLC data length."
+        assert contract_multiplier / \
+            4 == tick_value, "Tick value must be one-fourth of contract multiplier for quarter-point ticks."
         # DataTimeseries initialization, closing prices, start, end
         self.ohlc: np.ndarray = ohlc
         self.indicies: pd.DatetimeIndex = indicies
@@ -142,7 +149,7 @@ class Backtester:
         # Short Trades Winrate: {percentage_format(self.short_trades_winrate)}
         # Long Trades Winrate:  {percentage_format(self.long_trades_winrate)}
 
-    def vectorized_backtest(self, signal_matrix: np.ndarray) -> pd.DataFrame:
+    def vectorized_backtest(self, signal_matrix: np.ndarray) -> np.ndarray:
         """
         Runs a fully vectorized backtest on a matrix of signals.
 
@@ -207,41 +214,41 @@ class Backtester:
 
         # Max Drawdown (K,)
         # Use np.maximum.accumulate along the time axis (axis=1)
-        equity_max = np.maximum.accumulate(equity_curve_matrix, axis=1)
-        drawdown_curve = equity_curve_matrix - equity_max
-        max_drawdown = np.min(drawdown_curve, axis=1)  # (K,)
+        # equity_max = np.maximum.accumulate(equity_curve_matrix, axis=1)
+        # drawdown_curve = equity_curve_matrix - equity_max
+        # max_drawdown = np.min(drawdown_curve, axis=1)  # (K,)
 
-        # --- 4. Vectorized Performance Metrics ---
+        # # --- 4. Vectorized Performance Metrics ---
 
-        # Sharpe Ratio (K,)
-        bar_returns = trade_pnl_matrix / self.initial_equity
-        mean_ret = np.mean(bar_returns, axis=1)
-        std_ret = np.std(bar_returns, axis=1)
+        # # Sharpe Ratio (K,)
+        # bar_returns = trade_pnl_matrix / self.initial_equity
+        # mean_ret = np.mean(bar_returns, axis=1)
+        # std_ret = np.std(bar_returns, axis=1)
 
-        # Handle division by zero
-        sharpe_ratio = np.divide(mean_ret, std_ret,
-                                 out=np.zeros(K, dtype=float), where=std_ret != 0)
+        # # Handle division by zero
+        # sharpe_ratio = np.divide(mean_ret, std_ret,
+        #                          out=np.zeros(K, dtype=float), where=std_ret != 0)
 
-        bars_year = bars_per_year(self.timeframe)
-        sharpe_ratio *= np.sqrt(bars_year)
+        # bars_year = bars_per_year(self.timeframe)
+        # sharpe_ratio *= np.sqrt(bars_year)
 
-        # Profit Factor (K,)
-        total_gains = np.sum(
-            np.where(trade_pnl_matrix > 0, trade_pnl_matrix, 0), axis=1)
-        total_losses = -np.sum(np.where(trade_pnl_matrix <
-                               0, trade_pnl_matrix, 0), axis=1)
+        # # Profit Factor (K,)
+        # total_gains = np.sum(
+        #     np.where(trade_pnl_matrix > 0, trade_pnl_matrix, 0), axis=1)
+        # total_losses = -np.sum(np.where(trade_pnl_matrix <
+        #                        0, trade_pnl_matrix, 0), axis=1)
 
-        profit_factor = np.divide(total_gains, total_losses,
-                                  out=np.full(K, np.inf), where=total_losses != 0)
+        # profit_factor = np.divide(total_gains, total_losses,
+        #                           out=np.full(K, np.inf), where=total_losses != 0)
 
         # --- 5. Assemble Results ---
-        results = {
-            'TotalPnL': total_pnl,
-            'Sharpe': sharpe_ratio,
-            'MaxDrawdown': max_drawdown,
-            'ProfitFactor': profit_factor
-        }
-        return pd.DataFrame(results)
+        # results = {
+        #     'TotalPnL': total_pnl,
+        #     'Sharpe': sharpe_ratio,
+        #     'MaxDrawdown': max_drawdown,
+        #     'ProfitFactor': profit_factor
+        # }
+        return total_pnl
 
     def full_backtest(self) -> None:
         self.quick_backtest()
