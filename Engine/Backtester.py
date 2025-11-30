@@ -272,7 +272,7 @@ class Backtester:
         raw_pnl: np.ndarray = position * price_diff * self.contract_multiplier
         commision_cost: np.ndarray = self.trade_indicies * self.commission
         slippage_cost: np.ndarray = self.trade_indicies * self.slippage_ticks * \
-            self.tick_value * self.contract_multiplier
+            self.tick_value
 
         self.transaction_costs: np.ndarray = commision_cost + slippage_cost
         self.trade_pnl: np.ndarray = raw_pnl - self.transaction_costs

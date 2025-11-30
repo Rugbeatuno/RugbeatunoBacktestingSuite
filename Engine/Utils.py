@@ -4,6 +4,7 @@ from scipy.stats import binomtest, norm, t
 from math import sqrt
 import numpy as np
 import math
+import mplfinance as mpf
 
 from typing import Tuple
 
@@ -224,3 +225,51 @@ def get_max_consecutive_streak(arr: np.ndarray) -> int:
     max_streak = np.max(run_lengths)
 
     return max_streak
+
+
+def plot_candles_with_signal(df):
+    """
+    df must contain:
+        - Open, High, Low, Close
+        - '8ema'
+        - '32ema'
+        - 'signal' = {1, -1, 0}
+    """
+
+    # Colors for background shading
+    long_color = (0.8, 1.0, 0.8)     # light green
+    short_color = (1.0, 0.8, 0.8)    # light red
+
+    # Build signal shading regions
+    # addplots = [
+    #     mpf.make_addplot(df['8ema'], color='blue'),
+    #     mpf.make_addplot(df['32ema'], color='orange'),
+    # ]
+
+    # Highlight long/short areas
+    long_regions = df.index[df['signal'] > 0]
+    short_regions = df.index[df['signal'] < 0]
+
+    # Build shading dict
+    alines = []
+
+    if len(long_regions) > 0:
+        alines.append(
+            dict(alines=[(long_regions[0], long_regions[-1])],
+                 alpha=0.1, color=long_color)
+        )
+
+    if len(short_regions) > 0:
+        alines.append(
+            dict(alines=[(short_regions[0], short_regions[-1])],
+                 alpha=0.1, color=short_color)
+        )
+
+    mpf.plot(
+        df,
+        type='candle',
+        style='yahoo',
+        # addplot=addplots,
+        title="Candles + EMA + Signal",
+        volume=True,
+    )
