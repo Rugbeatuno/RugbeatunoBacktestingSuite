@@ -137,6 +137,12 @@ class DataTimeseries:
         self.ohlc = temp_df[['Open', 'High', 'Low', 'Close']].values
         self.volume = temp_df[['Volume']].values
 
+    def slice_data(self, start_date: pd.Timestamp, end_date: pd.Timestamp) -> None:
+        mask = (self.indicies >= start_date) & (self.indicies <= end_date)
+        self.indicies = self.indicies[mask]
+        self.ohlc = self.ohlc[mask, :]
+        self.volume = self.volume[mask, :]
+
     def get_indicies(self) -> pd.DatetimeIndex:
         return self.indicies
 

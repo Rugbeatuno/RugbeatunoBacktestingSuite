@@ -143,8 +143,8 @@ plot_price_series([pd.Series(permuted_ohlc[:, 3], index=data.get_indicies()), da
 #     [strategy_ret, bh_ret], ["Strategy", "Buy & Hold"])
 
 # backtester.generate_skew_curve().plot()
-# backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.01)
-backtester.monte_carlo_permutation_test(100, 0.01, 'Walk Forward')
+backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.01)
+backtester.monte_carlo_permutation_test(1000, 0.01, 'Walk Forward')
 
 # chart = Chart(data.get_ohlc_prices(), data.get_indicies(),
 #               signal=signal_series.values, window=300)
