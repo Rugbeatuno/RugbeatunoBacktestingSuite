@@ -121,8 +121,7 @@ backtester.full_backtest()
 print(backtester)
 # backtester.generate_trade_time_distribution()
 
-permuted_ohlc = DataTimeseries.get_permutation(
-    data.get_ohlc_prices(), data.get_indicies())
+permuted_ohlc = data.get_permutation()
 
 plot_price_series([pd.Series(permuted_ohlc[:, 3], index=data.get_indicies()), data.get_close_prices_series()], [
                   'permuted close', 'original'], pct_of_bars=1)
@@ -145,7 +144,7 @@ plot_price_series([pd.Series(permuted_ohlc[:, 3], index=data.get_indicies()), da
 
 # backtester.generate_skew_curve().plot()
 # backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.01)
-# backtester.monte_carlo_permutation_test(100, 0.01, 'Walk Forward')
+backtester.monte_carlo_permutation_test(100, 0.01, 'Walk Forward')
 
 # chart = Chart(data.get_ohlc_prices(), data.get_indicies(),
 #               signal=signal_series.values, window=300)

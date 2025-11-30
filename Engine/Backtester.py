@@ -549,7 +549,7 @@ class Backtester:
 
         for i in range(iterations):
             print(i)
-            permuted_ohlc: np.ndarray = DataTimeseries.permute_cme_ohlc(
+            permuted_ohlc: np.ndarray = DataTimeseries.generate_permutation(
                 self.ohlc, self.indicies)
             bt = Backtester(
                 permuted_ohlc,
