@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 from Engine.DataTimeseries import DataTimeseries
 from Engine.EquityCurve import EquityCurve
 from Engine.PnLDistribution import SkewCurve
-from Engine.Utils import dollar_format, percentage_format, number_format, confidence_interval, bars_per_year, p_value_one_tailed, get_max_consecutive_streak
+from Engine.Utils import dollar_format, percentage_format, number_format, confidence_interval, bars_per_year, p_value_one_tailed, get_max_consecutive_streak, confidence_interval_mean
 
 # equity curves
 # trade win distribution, skew analysis
@@ -36,12 +36,13 @@ class Backtester:
             ohlc), "Indicies length must match OHLC data length."
         assert contract_multiplier / \
             4 == tick_value, "Tick value must be one-fourth of contract multiplier for quarter-point ticks."
+        assert ohlc.shape[1] == 4, "OHLC data must have 4 columns (Open, High, Low, Close)."
+
         # DataTimeseries initialization, closing prices, start, end
         self.ohlc: np.ndarray = ohlc
         self.indicies: pd.DatetimeIndex = indicies
         self.timeframe: str = timeframe
-        self.close_prices: np.ndarray = self.ohlc[:,
-                                                  3] if ohlc.ndim == 2 else self.ohlc
+        self.close_prices: np.ndarray = self.ohlc[:, 3]
         self.start_date: pd.Timestamp = indicies[0]
         self.end_date: pd.Timestamp = indicies[-1]
         self.duration: pd.Timestamp = self.end_date - self.start_date
@@ -104,8 +105,8 @@ class Backtester:
         self.sortino_ratio: float = None
         self.profit_factor: float = None
 
-        self.alpha: float = None
-        self.beta: float = None
+        # self.alpha: float = None
+        # self.beta: float = None
 
     def __str__(self):
         mu, lb, ub = confidence_interval(
@@ -299,6 +300,57 @@ class Backtester:
     def generate_skew_curve(self) -> SkewCurve:
         return SkewCurve(self.trade_pnl, self.trade_indicies, self.initial_equity)
 
+    def generate_trade_time_distribution(self) -> None:
+        trade_groups = self.trade_indicies.cumsum()
+        trade_returns: pd.Series = pd.Series(
+            self.trade_pnl).groupby(trade_groups).sum()
+        trade_entry_times: pd.DatetimeIndex = self.indicies[self.trade_indicies.astype(
+            bool)]
+
+        trade_returns = trade_returns.iloc[1:]  # remove first trade (0.0)
+
+        assert len(trade_returns) == len(trade_entry_times)
+
+        entry_minutes = trade_entry_times.hour * \
+            60 + trade_entry_times.minute
+
+        minute_pnl_series = pd.Series(
+            trade_returns.values, index=entry_minutes)
+
+        # Sum the PNL for all trades that happened in the same minute of the day
+        total_returns_per_minute = minute_pnl_series.groupby(level=0).sum()
+
+        # --- Prepare for Bar Plotting ---
+        # The x-values are the minutes of the day (0 to 1439)
+        x_values = total_returns_per_minute.index.values
+        # The y-values are the total PNL for that minute
+        y_values = total_returns_per_minute.values
+
+        # Determine bar colors: green for profit, red for loss
+        colors = ['green' if pnl >= 0 else 'red' for pnl in y_values]
+
+        # --- Plotting ---
+        plt.figure(figsize=(12, 6))
+
+        # Use plt.bar to plot the total PNL for each minute bin
+        # 'width=1' ensures the bar covers a single minute
+        width = (self.indicies[1] - self.indicies[0]).seconds // 60
+        plt.bar(x_values, y_values, width=width,
+                color=colors, label='Total PNL')
+
+        # Add a horizontal line at PNL = 0 for reference
+        plt.axhline(0, color='black', linestyle='--', linewidth=1)
+
+        # Set x-axis ticks to display hours (0, 3, 6, ..., 24)
+        hour_ticks = range(0, 25, 3)
+        plt.xticks([h * 60 for h in hour_ticks],
+                   [f'{h:02d}:00' for h in hour_ticks])
+
+        plt.xlabel(f'Time of Day ({self.indicies.tzinfo})')
+        plt.ylabel('Total PNL / Trade Returns per Minute')
+        plt.title('Total Trade Returns (PNL) by Entry Time')
+        plt.show()
+
     def calculate_drawdown_metrics(self):
         equity_max: np.ndarray = np.maximum.accumulate(self.equity_curve)
 
@@ -312,6 +364,9 @@ class Backtester:
         # The peak is the maximum equity *before* the drawdown ended.
         start_index_location: int = np.argmax(
             self.equity_curve[:end_index_location])
+
+        self.max_drawdown_start = self.indicies[start_index_location]
+        self.max_drawdown_end = self.indicies[end_index_location]
 
         self.max_drawdown_duration = self.indicies[end_index_location] - \
             self.indicies[start_index_location]
@@ -435,20 +490,42 @@ class Backtester:
             plt.plot(x, equity_curve[x], linewidth=0.8,
                      alpha=0.5, color='gray')
 
+        drawdowns = np.array(drawdowns)
+
+        p_worst_drawdown = p_value_one_tailed(
+            drawdowns.mean(), drawdowns.std(), worst_drawdown, tail='left')
+
+        p_original_drawdown = p_value_one_tailed(
+            drawdowns.mean(), drawdowns.std(), original_drawdown, tail='left')
+
+        # Calculate the 99% Confidence Interval for the MEAN maximum drawdown
+        # alpha = 0.01 for 99% CI
+        _, lb, ub = confidence_interval_mean(
+            drawdowns.mean(), drawdowns.std(), iterations, 0.01)
+
+        # 2. Format Statistical Results
+        ci_range = f"({dollar_format(lb)} to {dollar_format(ub)})"
+        confidence_level = (1 - 0.01) * 100
+
         # Plot original strategy in black
         plt.plot(x, original_equity[x], color='black',
-                 linewidth=1.5, label=f'Original Drawdown: {dollar_format(original_drawdown)}')
+                 linewidth=1.5, label=f'Original Drawdown: {dollar_format(original_drawdown)} ({p_original_drawdown})')
 
         # Plot worst drawdown in red
         plt.plot(x, worst_equity[x], color='red',
-                 linewidth=1.5, label=f'Worst Drawdown: {dollar_format(worst_drawdown)}')
+                 linewidth=1.5, label=f'Worst Drawdown: {dollar_format(worst_drawdown)} ({p_worst_drawdown})')
 
         # Plot best drawdown in blue
         plt.plot(x, best_equity[x], color='blue',
                  linewidth=1.5, label=f'Best Drawdown: {dollar_format(best_drawdown)}')
 
-        plt.title(
-            f"Monte Carlo PnL Resampling Test (showing every {step} bars)\n Avg. Drawdown: {dollar_format(np.array(drawdowns).mean())}")
+        # 3. Create the Title String
+        title_text = (
+            f"Monte Carlo PnL Resampling Test\n"
+            f"Avg. Drawdown: {dollar_format(drawdowns.mean())}\n"
+            f"{confidence_level:.0f}% CI: {ci_range}"
+        )
+        plt.title(title_text)
         plt.xlabel("Trades")
         plt.ylabel("Returns")
         plt.grid(True, alpha=0.25)
@@ -472,10 +549,10 @@ class Backtester:
 
         for i in range(iterations):
             print(i)
-            permuted_close_prices: np.ndarray = DataTimeseries.generate_permuted_close_prices(
-                self.close_prices)
+            permuted_ohlc: np.ndarray = DataTimeseries.permute_cme_ohlc(
+                self.ohlc, self.indicies)
             bt = Backtester(
-                permuted_close_prices,
+                permuted_ohlc,
                 self.indicies,
                 self.signal,
                 self.timeframe,

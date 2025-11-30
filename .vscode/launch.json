@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "cppdbg",
+      "request": "launch",
+      "args": [],
+      "stopAtEntry": false,
+      "externalConsole": true,
+      "cwd": "c:/Users/ryany/AppData/Local/Temp/c1ae585d-b969-440f-96b0-9b684b60a1c0_5bebce0cd7c90b65f240fe5b085246be.zip.1c0/BOOTDD",
+      "program": "c:/Users/ryany/AppData/Local/Temp/c1ae585d-b969-440f-96b0-9b684b60a1c0_5bebce0cd7c90b65f240fe5b085246be.zip.1c0/BOOTDD/build/Debug/outDebug",
+      "MIMode": "gdb",
+      "miDebuggerPath": "gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    }
+  ]
+}

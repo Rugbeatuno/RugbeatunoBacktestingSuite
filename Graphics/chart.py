@@ -57,25 +57,25 @@ class Chart:
         )
 
         # # plot signal bars, bottom 5%
-        # if self.signal is not None:
-        #     window_signal = self.signal[self.plot_start:end_index]
+        if self.signal is not None:
+            window_signal = self.signal[self.plot_start:end_index]
 
-        #     # Create color mapping: 1=green, -1=red, 0=gray/white
-        #     colors = np.where(window_signal > 0, 'g', np.where(
-        #         window_signal < 0, 'r', 'lightgray'))
+            # Create color mapping: 1=green, -1=red, 0=gray/white
+            colors = np.where(window_signal > 0, 'g', np.where(
+                window_signal < 0, 'r', 'lightgray'))
 
-        #     self.ax2.bar(
-        #         x=window_indicies,
-        #         height=window_signal,
-        #         width=1/1440,  # width of one minute in days
-        #         color=colors
-        #     )
+            self.ax2.bar(
+                x=window_indicies,
+                height=window_signal,
+                width=1/1440,  # width of one minute in days
+                color=colors
+            )
 
-        #     self.ax2.set_yticks([-1, 0, 1])
-        #     self.ax2.set_yticklabels(['Short', 'Neutral', 'Long'])
-        #     self.ax2.tick_params(axis='y', labelsize=8)
-        #     self.ax2.set_xlabel("Date")
-        #     self.ax2.grid(axis='y', linestyle='--')
+            self.ax2.set_yticks([-1, 0, 1])
+            self.ax2.set_yticklabels(['Short', 'Neutral', 'Long'])
+            self.ax2.tick_params(axis='y', labelsize=8)
+            self.ax2.set_xlabel("Date")
+            self.ax2.grid(axis='y', linestyle='--')
 
         # # --- 4. Plot Trade Arrows (ax1) ---
 

@@ -1,8 +1,11 @@
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy.stats import binomtest, norm
+from scipy.stats import binomtest, norm, t
 from math import sqrt
 import numpy as np
+import math
+
+from typing import Tuple
 
 
 def dollar_format(value: float) -> str:
@@ -54,6 +57,55 @@ def confidence_interval(k: int, n: int, alpha=0.05):
     lower = max(0.0, center - half)
     upper = min(1.0, center + half)
     return p_hat, lower, upper
+
+
+def confidence_interval_mean(
+    sample_mean: float,
+    sample_std: float,
+    n: int,
+    alpha: float = 0.05
+) -> Tuple[float, float, float]:
+    """
+    Calculates the Student's t-confidence interval for a population mean.
+
+    This interval is recommended when the population standard deviation is
+    unknown and the sample size (n) is relatively small, or when the
+    population is normally distributed.
+
+    Args:
+        sample_mean (float): The mean of the sample (x_bar).
+        sample_std (float): The standard deviation of the sample (s).
+        n (int): The size of the sample. Must be > 1.
+        alpha (float): The significance level (e.g., 0.05 for 95% confidence).
+
+    Returns:
+        Tuple[float, float, float]: A tuple containing (sample_mean, lower_bound, upper_bound).
+    """
+    if n <= 1:
+        raise ValueError(
+            "Sample size 'n' must be greater than 1 to calculate degrees of freedom.")
+
+    # Degrees of Freedom (df) is n - 1
+    df = n - 1
+
+    # 1. Find the Critical T-Value
+    # We use (1 - alpha/2) because it's a two-tailed test
+    t_score = t.ppf(1 - alpha / 2, df)
+
+    # 2. Calculate the Standard Error of the Mean (SE)
+    standard_error = sample_std / math.sqrt(n)
+
+    # 3. Calculate the Margin of Error (ME)
+    margin_of_error = t_score * standard_error
+
+    # 4. Calculate the bounds
+    lower = sample_mean - margin_of_error
+    upper = sample_mean + margin_of_error
+
+    # The confidence level is 1 - alpha
+    # confidence_level = (1 - alpha) * 100
+
+    return sample_mean, lower, upper
 
 
 def plot_price_series(price_series: list, labels: list, pct_of_bars: float = 1, figsize=(14, 6)):

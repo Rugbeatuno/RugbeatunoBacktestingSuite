@@ -16,7 +16,8 @@ EMSD_SHORT_LENGTH = 64
 EMSD_LONG_LENGTH = 256
 
 data = DataTimeseries('./Data/nq_continous.csv', 'NQ')
-# m5_resampled = data_timeseries.get_resampled_data('1D')
+data.convert_timezone('America/New_York')
+data.resample_data('5min')
 close: pd.Series = data.get_close_prices_series()
 
 # # N and 4N pairs
@@ -118,7 +119,13 @@ backtester = Backtester(
 backtester.full_backtest()
 
 print(backtester)
+# backtester.generate_trade_time_distribution()
 
+permuted_ohlc = DataTimeseries.get_permutation(
+    data.get_ohlc_prices(), data.get_indicies())
+
+plot_price_series([pd.Series(permuted_ohlc[:, 3], index=data.get_indicies()), data.get_close_prices_series()], [
+                  'permuted close', 'original'], pct_of_bars=1)
 # permuted_series = DataTimeseries.generate_permuted_close_series(
 #     data.get_close_prices(), data.get_indicies())
 # plot_price_series([permuted_series, close], [
@@ -126,20 +133,20 @@ print(backtester)
 
 # plot_price_series([close], ['close'], pct_of_bars=.2)
 
-strategy_ret = backtester.generate_equity_curve()
+# strategy_ret = backtester.generate_equity_curve()
 # bh_ret = backtester.generate_buy_hold_equity_curve()
 
-strategy_ret.plot('strategy', show_drawdown=True)
-backtester.generate_skew_curve().plot()
+# strategy_ret.plot('strategy', show_drawdown=True)
+# backtester.generate_skew_curve().plot()
 # bh_ret.plot('buy hold', show_drawdown=True)
 
 # EquityCurve.combine_equity_curves(
 #     [strategy_ret, bh_ret], ["Strategy", "Buy & Hold"])
 
 # backtester.generate_skew_curve().plot()
-# backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.05)
+# backtester.monte_carlo_pnl_resampling_test(iterations=1000, pct_of_trades=0.01)
 # backtester.monte_carlo_permutation_test(100, 0.01, 'Walk Forward')
 
-chart = Chart(data.get_ohlc_prices(), data.get_indicies(),
-              signal=signal_series.values, window=300)
-chart.plot_candles()
+# chart = Chart(data.get_ohlc_prices(), data.get_indicies(),
+#               signal=signal_series.values, window=300)
+# chart.plot_candles()
