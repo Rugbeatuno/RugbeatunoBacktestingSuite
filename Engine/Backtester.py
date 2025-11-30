@@ -469,6 +469,7 @@ class Backtester:
         worst_equity = None
         worst_drawdown = 0  # negative drawdown
         drawdowns = []
+        ruin_simulations = 0
 
         for _ in range(iterations):
             shuffled = np.random.permutation(trade_returns)
@@ -476,6 +477,11 @@ class Backtester:
             drawdown = (equity_curve -
                         np.maximum.accumulate(equity_curve)).min()
             drawdowns.append(drawdown)
+
+            # risk of ruin calculation
+            drawdown_pct = abs(drawdown / equity_curve.max())
+            if drawdown_pct > 0.5:
+                ruin_simulations += 1
 
             # Update worst
             if drawdown < worst_drawdown:
@@ -498,15 +504,6 @@ class Backtester:
         p_original_drawdown = p_value_one_tailed(
             drawdowns.mean(), drawdowns.std(), original_drawdown, tail='left')
 
-        # Calculate the 99% Confidence Interval for the MEAN maximum drawdown
-        # alpha = 0.01 for 99% CI
-        _, lb, ub = confidence_interval_mean(
-            drawdowns.mean(), drawdowns.std(), iterations, 0.01)
-
-        # 2. Format Statistical Results
-        ci_range = f"({dollar_format(lb)} to {dollar_format(ub)})"
-        confidence_level = (1 - 0.01) * 100
-
         # Plot original strategy in black
         plt.plot(x, original_equity[x], color='black',
                  linewidth=1.5, label=f'Original Drawdown: {dollar_format(original_drawdown)} ({p_original_drawdown})')
@@ -523,7 +520,7 @@ class Backtester:
         title_text = (
             f"Monte Carlo PnL Resampling Test\n"
             f"Avg. Drawdown: {dollar_format(drawdowns.mean())}\n"
-            f"{confidence_level:.0f}% CI: {ci_range}"
+            f"Risk of Ruin (50%): {percentage_format(ruin_simulations / iterations)}"
         )
         plt.title(title_text)
         plt.xlabel("Trades")
