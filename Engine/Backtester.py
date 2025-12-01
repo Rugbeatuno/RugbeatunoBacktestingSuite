@@ -1,6 +1,8 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
+import matplotlib.dates as mdates
 
 from Engine.DataTimeseries import DataTimeseries
 from Engine.EquityCurve import EquityCurve
@@ -130,13 +132,13 @@ class Backtester:
         Largest Loss:     {dollar_format(self.largest_loss)}
         Max Consec. Wins: {self.max_consec_wins}
         Max Consec. Loss: {self.max_consec_losses}
-        
+
         Max Drawdown from {self.max_drawdown_start} to {self.max_drawdown_end} ({self.max_drawdown_duration})
         Max Drawdown:     {dollar_format(self.max_drawdown)}
         Max Drawdown (%): {percentage_format(self.max_drawdown_pct)}
-    
+
         Slippage:   {self.slippage_ticks} ticks
-        Commission: {dollar_format(self.commission)} 
+        Commission: {dollar_format(self.commission)}
         Contract Multiplier: {dollar_format(self.contract_multiplier)}
 
         Performance Metrics:
@@ -149,107 +151,6 @@ class Backtester:
         # Long Trades Won:      {self.long_trades_won}
         # Short Trades Winrate: {percentage_format(self.short_trades_winrate)}
         # Long Trades Winrate:  {percentage_format(self.long_trades_winrate)}
-
-    def vectorized_backtest(self, signal_matrix: np.ndarray) -> np.ndarray:
-        """
-        Runs a fully vectorized backtest on a matrix of signals.
-
-        Parameters
-        ----------
-        signal_matrix : np.ndarray
-            A 2D array of shape (K, N), where K is the number of
-            parameter combinations (strategies) and N is the number of bars.
-
-        Returns
-        -------
-        pd.DataFrame
-            A DataFrame with K rows, where each row contains the
-            performance metrics for a single strategy.
-        """
-
-        # K = number of strategies (param combinations)
-        # N = number of bars
-        K, N = signal_matrix.shape
-
-        if N != len(self.close_prices):
-            raise ValueError(f"Signal matrix bar dimension ({N}) does not match "
-                             f"Backtester's close prices dimension ({len(self.close_prices)}).")
-
-        # --- 1. Vectorized PnL Calculation ---
-
-        # Price diff is a 1D array (N,)
-        price_diff = np.insert(np.diff(self.close_prices), 0, 0.0)
-
-        # Position matrix (K, N)
-        # Roll along the time axis (axis=1)
-        position_matrix = np.roll(signal_matrix, 1, axis=1)
-        position_matrix[:, 0] = 0.0
-
-        # PnL Matrix (K, N)
-        # Broadcasting: (K, N) * (N,) -> (K, N)
-        raw_pnl_matrix = position_matrix * price_diff * self.contract_multiplier
-
-        # --- 2. Vectorized Costs Calculation ---
-
-        # Trade Indicies Matrix (K, N)
-        trade_indicies_matrix = np.insert(
-            np.abs(np.diff(signal_matrix, axis=1)), 0, 0.0, axis=1)
-
-        commission_cost = trade_indicies_matrix * self.commission
-        slippage_cost = (trade_indicies_matrix * self.slippage_ticks *
-                         self.tick_value * self.contract_multiplier)
-
-        transaction_costs = commission_cost + slippage_cost
-
-        trade_pnl_matrix = raw_pnl_matrix - transaction_costs
-
-        # --- 3. Vectorized Equity & Drawdown ---
-
-        # Equity Curve Matrix (K, N)
-        # Cumsum along the time axis (axis=1)
-        cum_trade_pnl_matrix = np.cumsum(trade_pnl_matrix, axis=1)
-        equity_curve_matrix = self.initial_equity + cum_trade_pnl_matrix
-
-        # Total PnL (K,)
-        total_pnl = equity_curve_matrix[:, -1] - self.initial_equity
-
-        # Max Drawdown (K,)
-        # Use np.maximum.accumulate along the time axis (axis=1)
-        # equity_max = np.maximum.accumulate(equity_curve_matrix, axis=1)
-        # drawdown_curve = equity_curve_matrix - equity_max
-        # max_drawdown = np.min(drawdown_curve, axis=1)  # (K,)
-
-        # # --- 4. Vectorized Performance Metrics ---
-
-        # # Sharpe Ratio (K,)
-        # bar_returns = trade_pnl_matrix / self.initial_equity
-        # mean_ret = np.mean(bar_returns, axis=1)
-        # std_ret = np.std(bar_returns, axis=1)
-
-        # # Handle division by zero
-        # sharpe_ratio = np.divide(mean_ret, std_ret,
-        #                          out=np.zeros(K, dtype=float), where=std_ret != 0)
-
-        # bars_year = bars_per_year(self.timeframe)
-        # sharpe_ratio *= np.sqrt(bars_year)
-
-        # # Profit Factor (K,)
-        # total_gains = np.sum(
-        #     np.where(trade_pnl_matrix > 0, trade_pnl_matrix, 0), axis=1)
-        # total_losses = -np.sum(np.where(trade_pnl_matrix <
-        #                        0, trade_pnl_matrix, 0), axis=1)
-
-        # profit_factor = np.divide(total_gains, total_losses,
-        #                           out=np.full(K, np.inf), where=total_losses != 0)
-
-        # --- 5. Assemble Results ---
-        # results = {
-        #     'TotalPnL': total_pnl,
-        #     'Sharpe': sharpe_ratio,
-        #     'MaxDrawdown': max_drawdown,
-        #     'ProfitFactor': profit_factor
-        # }
-        return total_pnl
 
     def full_backtest(self) -> None:
         self.quick_backtest()
@@ -285,71 +186,6 @@ class Backtester:
 
     def calculate_raw_buy_hold_return(self) -> float:
         return self.close_prices[-1] / self.close_prices[0] - 1
-
-    def generate_equity_curve(self) -> EquityCurve:
-        return EquityCurve(self.equity_curve, self.drawdown_curve, self.trade_indicies, self.indicies)
-
-    def generate_buy_hold_equity_curve(self) -> EquityCurve:
-        shares: float = self.initial_equity / self.close_prices[0]
-        equity_curve: np.ndarray = shares * self.close_prices
-        drawdown_curve: np.ndarray = equity_curve - \
-            np.maximum.accumulate(equity_curve)
-
-        return EquityCurve(equity_curve, drawdown_curve, self.trade_indicies, self.indicies)
-
-    def generate_skew_curve(self) -> SkewCurve:
-        return SkewCurve(self.trade_pnl, self.trade_indicies, self.initial_equity)
-
-    def generate_trade_time_distribution(self) -> None:
-        trade_groups = self.trade_indicies.cumsum()
-        trade_returns: pd.Series = pd.Series(
-            self.trade_pnl).groupby(trade_groups).sum()
-        trade_entry_times: pd.DatetimeIndex = self.indicies[self.trade_indicies.astype(
-            bool)]
-
-        trade_returns = trade_returns.iloc[1:]  # remove first trade (0.0)
-
-        assert len(trade_returns) == len(trade_entry_times)
-
-        entry_minutes = trade_entry_times.hour * \
-            60 + trade_entry_times.minute
-
-        minute_pnl_series = pd.Series(
-            trade_returns.values, index=entry_minutes)
-
-        # Sum the PNL for all trades that happened in the same minute of the day
-        total_returns_per_minute = minute_pnl_series.groupby(level=0).sum()
-
-        # --- Prepare for Bar Plotting ---
-        # The x-values are the minutes of the day (0 to 1439)
-        x_values = total_returns_per_minute.index.values
-        # The y-values are the total PNL for that minute
-        y_values = total_returns_per_minute.values
-
-        # Determine bar colors: green for profit, red for loss
-        colors = ['green' if pnl >= 0 else 'red' for pnl in y_values]
-
-        # --- Plotting ---
-        plt.figure(figsize=(12, 6))
-
-        # Use plt.bar to plot the total PNL for each minute bin
-        # 'width=1' ensures the bar covers a single minute
-        width = (self.indicies[1] - self.indicies[0]).seconds // 60
-        plt.bar(x_values, y_values, width=width,
-                color=colors, label='Total PNL')
-
-        # Add a horizontal line at PNL = 0 for reference
-        plt.axhline(0, color='black', linestyle='--', linewidth=1)
-
-        # Set x-axis ticks to display hours (0, 3, 6, ..., 24)
-        hour_ticks = range(0, 25, 3)
-        plt.xticks([h * 60 for h in hour_ticks],
-                   [f'{h:02d}:00' for h in hour_ticks])
-
-        plt.xlabel(f'Time of Day ({self.indicies.tzinfo})')
-        plt.ylabel('Total PNL / Trade Returns per Minute')
-        plt.title('Total Trade Returns (PNL) by Entry Time')
-        plt.show()
 
     def calculate_drawdown_metrics(self):
         equity_max: np.ndarray = np.maximum.accumulate(self.equity_curve)
@@ -447,6 +283,71 @@ class Backtester:
         self.profit_factor = total_gains / \
             total_losses if total_losses > 0 else float('inf')
 
+    def generate_equity_curve(self) -> EquityCurve:
+        return EquityCurve(self.equity_curve, self.drawdown_curve, self.trade_indicies, self.indicies)
+
+    def generate_buy_hold_equity_curve(self) -> EquityCurve:
+        shares: float = self.initial_equity / self.close_prices[0]
+        equity_curve: np.ndarray = shares * self.close_prices
+        drawdown_curve: np.ndarray = equity_curve - \
+            np.maximum.accumulate(equity_curve)
+
+        return EquityCurve(equity_curve, drawdown_curve, self.trade_indicies, self.indicies)
+
+    def generate_skew_curve(self) -> SkewCurve:
+        return SkewCurve(self.trade_pnl, self.trade_indicies, self.initial_equity)
+
+    def generate_trade_time_distribution(self) -> None:
+        trade_groups = self.trade_indicies.cumsum()
+        trade_returns: pd.Series = pd.Series(
+            self.trade_pnl).groupby(trade_groups).sum()
+        trade_entry_times: pd.DatetimeIndex = self.indicies[self.trade_indicies.astype(
+            bool)]
+
+        trade_returns = trade_returns.iloc[1:]  # remove first trade (0.0)
+
+        assert len(trade_returns) == len(trade_entry_times)
+
+        entry_minutes = trade_entry_times.hour * \
+            60 + trade_entry_times.minute
+
+        minute_pnl_series = pd.Series(
+            trade_returns.values, index=entry_minutes)
+
+        # Sum the PNL for all trades that happened in the same minute of the day
+        total_returns_per_minute = minute_pnl_series.groupby(level=0).sum()
+
+        # --- Prepare for Bar Plotting ---
+        # The x-values are the minutes of the day (0 to 1439)
+        x_values = total_returns_per_minute.index.values
+        # The y-values are the total PNL for that minute
+        y_values = total_returns_per_minute.values
+
+        # Determine bar colors: green for profit, red for loss
+        colors = ['green' if pnl >= 0 else 'red' for pnl in y_values]
+
+        # --- Plotting ---
+        plt.figure(figsize=(12, 6))
+
+        # Use plt.bar to plot the total PNL for each minute bin
+        # 'width=1' ensures the bar covers a single minute
+        width = (self.indicies[1] - self.indicies[0]).seconds // 60
+        plt.bar(x_values, y_values, width=width,
+                color=colors, label='Total PNL')
+
+        # Add a horizontal line at PNL = 0 for reference
+        plt.axhline(0, color='black', linestyle='--', linewidth=1)
+
+        # Set x-axis ticks to display hours (0, 3, 6, ..., 24)
+        hour_ticks = range(0, 25, 3)
+        plt.xticks([h * 60 for h in hour_ticks],
+                   [f'{h:02d}:00' for h in hour_ticks])
+
+        plt.xlabel(f'Time of Day ({self.indicies.tzinfo})')
+        plt.ylabel('Total PNL / Trade Returns per Minute')
+        plt.title('Total Trade Returns (PNL) by Entry Time')
+        plt.show()
+
     def monte_carlo_pnl_resampling_test(self, iterations: int = 1000, pct_of_trades: float = 1):
         trade_groups = self.trade_indicies.cumsum()
         trade_returns: np.ndarray = pd.Series(self.trade_pnl).groupby(
@@ -455,8 +356,6 @@ class Backtester:
         n_trades = len(trade_returns)
         step = int(1 / pct_of_trades)
         x = np.arange(0, n_trades, step)
-
-        plt.figure(figsize=(12, 6))
 
         # Original strategy
         original_equity = trade_returns.cumsum()
@@ -470,6 +369,9 @@ class Backtester:
         worst_drawdown = 0  # negative drawdown
         drawdowns = []
         ruin_simulations = 0
+
+        # plotting
+        curves = []
 
         for _ in range(iterations):
             shuffled = np.random.permutation(trade_returns)
@@ -493,8 +395,7 @@ class Backtester:
                 best_drawdown = drawdown
                 best_equity = equity_curve.copy()
 
-            plt.plot(x, equity_curve[x], linewidth=0.8,
-                     alpha=0.5, color='gray')
+            curves.append(equity_curve[x])
 
         drawdowns = np.array(drawdowns)
 
@@ -504,17 +405,29 @@ class Backtester:
         p_original_drawdown = p_value_one_tailed(
             drawdowns.mean(), drawdowns.std(), original_drawdown, tail='left')
 
+        fig, ax = plt.subplots(figsize=(12, 6))
+
+        line_segments = [np.column_stack((x, c)) for c in curves]
+        lc = LineCollection(line_segments, color='gray',
+                            linewidth=0.8, alpha=0.5)
+        ax.add_collection(lc)
+        all_data = np.concatenate(curves)
+        min_y = all_data.min()
+        max_y = all_data.max()
+        padding = (max_y - min_y) * 0.02
+        ax.set_ylim(min_y - padding, max_y + padding)
+
         # Plot original strategy in black
-        plt.plot(x, original_equity[x], color='black',
-                 linewidth=1.5, label=f'Original Drawdown: {dollar_format(original_drawdown)} ({p_original_drawdown})')
+        ax.plot(x, original_equity[x], color='black',
+                linewidth=1.5, label=f'Original Drawdown: {dollar_format(original_drawdown)} ({p_original_drawdown})')
 
         # Plot worst drawdown in red
-        plt.plot(x, worst_equity[x], color='red',
-                 linewidth=1.5, label=f'Worst Drawdown: {dollar_format(worst_drawdown)} ({p_worst_drawdown})')
+        ax.plot(x, worst_equity[x], color='red',
+                linewidth=1.5, label=f'Worst Drawdown: {dollar_format(worst_drawdown)} ({p_worst_drawdown})')
 
         # Plot best drawdown in blue
-        plt.plot(x, best_equity[x], color='blue',
-                 linewidth=1.5, label=f'Best Drawdown: {dollar_format(best_drawdown)}')
+        ax.plot(x, best_equity[x], color='blue',
+                linewidth=1.5, label=f'Best Drawdown: {dollar_format(best_drawdown)}')
 
         # 3. Create the Title String
         title_text = (
@@ -540,6 +453,11 @@ class Backtester:
         mask[::pct_of_trades] = 1
         mask = mask.astype(bool)
 
+        # curves
+        x = self.indicies[mask]
+        x = mdates.date2num(x)
+        curves = []
+
         # 1x2
         fig, axes = plt.subplots(1, 2, figsize=(18, 6))
         ax_left, ax_right = axes
@@ -562,17 +480,21 @@ class Backtester:
             bt.quick_backtest()
 
             permutation_returns.append(bt.total_pnl)
+            curves.append(bt.equity_curve[mask])
 
-            ax_left.plot(
-                bt.indicies[mask],
-                bt.equity_curve[mask],
-                linewidth=0.8,
-                color='gray'
-            )
+        # plot all equity curves
+        lines = [np.column_stack((x, c)) for c in curves]
+        lc = LineCollection(lines, color='gray', linewidth=0.8, alpha=0.5)
+        ax_left.add_collection(lc)
 
         # plot original equity curve
         ax_left.plot(self.indicies[mask], self.equity_curve[mask],
                      linewidth=1, color='blue')
+        all_data = np.concatenate(curves)
+        min_y = all_data.min()
+        max_y = all_data.max()
+        padding = (max_y - min_y) * 0.02
+        ax_left.set_ylim(min_y - padding, max_y + padding)
 
         ax_left.set_title(
             f"Monte Carlo {title} Permutation Test (showing every {pct_of_trades} bars)")

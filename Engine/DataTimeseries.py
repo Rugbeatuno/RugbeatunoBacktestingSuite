@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import re
+from typing import Tuple
 
 
 class DataTimeseries:
@@ -40,7 +41,7 @@ class DataTimeseries:
 
     MONTH_CODES = "FGHJKMNQUVXZ"   # standard CME month codes
 
-    def __init__(self, filepath: str, symbol: str):
+    def __init__(self, filepath: str = None):
         """
         Parameters
         ----------
@@ -50,16 +51,16 @@ class DataTimeseries:
             symbol, e.g., "NQ", "ES", "CL".
         """
 
-        self._filepath: str = filepath
-        self.symbol: str = symbol.upper()
-        self.symbol_len: int = len(symbol)
-        self.timezone: str = None
-        self.timeframe: str = '1min'
-        self.valid_contract_pattern = f"^{self.symbol}[{self.MONTH_CODES}][0-9]$"
+        if filepath is None:
+            return
 
-        self.indicies: pd.DatetimeIndex = None
-        self.ohlc: np.ndarray = None
-        self.volume: np.ndarray = None
+        self._filepath: str = filepath
+        self._timezone: str = None
+        self._timeframe: str = '1min'
+
+        self._indicies: pd.DatetimeIndex = None
+        self._ohlc: np.ndarray = None
+        self._volume: np.ndarray = None
 
         self._load_data()
 
@@ -87,36 +88,26 @@ class DataTimeseries:
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")
 
-        self.timezone = df.index.tz
-        self.timeframe = '1min'
+        self._timezone = df.index.tz
+        self._timeframe = '1min'
 
         assert df.index.is_unique, "Duplicate Indicies"
 
         print(f'\nStart:     {df.index[0]}')
         print(f'End:       {df.index[-1]}')
-        print(f'Timezone:  {self.timezone}')
-        print(f'Timeframe: {self.timeframe}')
+        print(f'Timezone:  {self._timezone}')
+        print(f'Timeframe: {self._timeframe}')
         print(f"Loaded {len(df):,} clean rows\n")
 
-        self.indicies = df.index
-        self.ohlc = df[['Open', 'High', 'Low', 'Close']].values
-        self.volume = df[['Volume']].values
+        self._indicies = df.index
+        self._ohlc = df[['Open', 'High', 'Low', 'Close']].values
+        self._volume = df[['Volume']].values
 
     def convert_timezone(self, timezone: str):
         assert timezone in self.TIMEZONES, f"Invalid timezone '{timezone}'"
 
-        self.timezone = timezone
-        self.indicies = self.indicies.tz_convert(timezone)
-
-    def find_gaps(self) -> pd.DatetimeIndex:
-        # start_time: pd.Timestamp = self.df.index[0]
-        # end_time: pd.Timestamp = self.df.index[-1]
-
-        # no_gaps: pd.DatetimeIndex = pd.date_range(
-        #     start=start_time, end=end_time, freq=self.timeframe)
-        # missing: pd.DatetimeIndex = no_gaps.difference(self.df.index)
-
-        pass
+        self._timezone = timezone
+        self._indicies = self._indicies.tz_convert(timezone)
 
     def resample_data(self, timeframe: str) -> None:
         assert timeframe in self.TIMEFRAMES, f'Invalid resampling timeframe: "{timeframe}"'
@@ -132,50 +123,62 @@ class DataTimeseries:
             'Volume': 'sum',
         }).dropna()
 
-        self.timeframe = timeframe
-        self.indicies = temp_df.index
-        self.ohlc = temp_df[['Open', 'High', 'Low', 'Close']].values
-        self.volume = temp_df[['Volume']].values
+        self._timeframe = timeframe
+        self._indicies = temp_df.index
+        self._ohlc = temp_df[['Open', 'High', 'Low', 'Close']].values
+        self._volume = temp_df[['Volume']].values
 
-    def slice_data(self, start_date: pd.Timestamp, end_date: pd.Timestamp) -> None:
-        mask = (self.indicies >= start_date) & (self.indicies <= end_date)
-        self.indicies = self.indicies[mask]
-        self.ohlc = self.ohlc[mask, :]
-        self.volume = self.volume[mask, :]
+    def split(self, split_date: pd.Timestamp) -> Tuple['DataTimeseries', 'DataTimeseries']:
+        # split the currently loaded data
+        split_idx = self._indicies.searchsorted(split_date)
+
+        oos = DataTimeseries()
+        oos._indicies = self._indicies[split_idx:]
+        oos._ohlc = self._ohlc[split_idx:]
+        oos._volume = self._volume[split_idx:]
+        oos._timeframe = self._timeframe
+        oos._timezone = self._timezone
+        oos._filepath = self._filepath
+
+        self._indicies = self._indicies[:split_idx]
+        self._ohlc = self._ohlc[:split_idx]
+        self._volume = self._volume[:split_idx]
+
+        return self, oos
 
     def get_indicies(self) -> pd.DatetimeIndex:
-        return self.indicies
+        return self._indicies
 
     def get_close_prices(self) -> np.ndarray:
-        return self.ohlc[:, 3]
+        return self._ohlc[:, 3]
 
     def get_close_prices_series(self) -> pd.Series:
-        return pd.Series(self.get_close_prices(), index=self.indicies)
+        return pd.Series(self.get_close_prices(), index=self._indicies)
 
     def get_ohlc_prices(self) -> np.ndarray:
-        return self.ohlc
+        return self._ohlc
 
     def get_start_date(self) -> pd.Timestamp:
-        return self.indicies[0]
+        return self._indicies[0]
 
     def get_end_date(self) -> pd.Timestamp:
-        return self.indicies[-1]
+        return self._indicies[-1]
 
     def get_ohlc_prices_series(self) -> pd.DataFrame:
         df = pd.DataFrame(
-            self.ohlc,
-            index=self.indicies,
+            self._ohlc,
+            index=self._indicies,
             columns=['Open', 'High', 'Low', 'Close']
         )
-        df['Volume'] = self.volume
+        df['Volume'] = self._volume
 
         return df
 
     def get_timeframe(self) -> str:
-        return self.timeframe
+        return self._timeframe
 
     def get_permutation(self) -> np.ndarray:
-        return DataTimeseries.generate_permutation(self.ohlc, self.indicies)
+        return DataTimeseries.generate_permutation(self._ohlc, self._indicies)
 
     @staticmethod
     def generate_permutation(ohlc: np.ndarray, indicies: pd.DatetimeIndex) -> np.ndarray:
