@@ -39,8 +39,6 @@ class DataTimeseries:
         'Asia/Seoul'
     ]
 
-    MONTH_CODES = "FGHJKMNQUVXZ"   # standard CME month codes
-
     def __init__(self, filepath: str = None):
         """
         Parameters
@@ -128,6 +126,17 @@ class DataTimeseries:
         self._ohlc = temp_df[['Open', 'High', 'Low', 'Close']].values
         self._volume = temp_df[['Volume']].values
 
+    def slice(self, start_date: pd.Timestamp = None, end_date: pd.Timestamp = None) -> None:
+        start: pd.Timestamp = start_date if start_date else self.get_start_date()
+        end: pd.Timestamp = end_date if end_date else self.get_end_date()
+
+        start_idx = self._indicies.searchsorted(start, side='left')
+        end_idx = self._indicies.searchsorted(end, side='right')
+
+        self._indicies = self._indicies[start_idx:end_idx]
+        self._ohlc = self._ohlc[start_idx:end_idx]
+        self._volume = self._volume[start_idx:end_idx]
+
     def split(self, split_date: pd.Timestamp) -> Tuple['DataTimeseries', 'DataTimeseries']:
         # split the currently loaded data
         split_idx = self._indicies.searchsorted(split_date)
@@ -145,6 +154,35 @@ class DataTimeseries:
         self._volume = self._volume[:split_idx]
 
         return self, oos
+
+    def concatenate(self, dataTimeseries: 'DataTimeseries') -> 'DataTimeseries':
+        other = dataTimeseries
+
+        # Check metadata consistency
+        if self._timeframe != other._timeframe:
+            raise ValueError(
+                "Cannot concatenate DataTimeseries objects with different timeframes.")
+        if self._timezone != other._timezone:
+            raise ValueError(
+                "Cannot concatenate DataTimeseries objects with different timezones.")
+
+        # Check for temporal overlap (a simple check, often required for backtesting)
+        if len(self._indicies) > 0 and len(other.get_indicies()) > 0:
+            if other.get_indicies()[0] <= self._indicies[-1]:
+                # The start of the 'other' data is before or equal to the end of 'self' data.
+                # This indicates overlap or non-sequential data, which is usually forbidden in time-series concatenation.
+                raise ValueError(
+                    f"Temporal overlap detected. Start of appended data ({other.get_indicies()[0]}) "
+                    f"must be strictly after end of current data ({self._indicies[-1]})."
+                )
+
+        self._indicies = self._indicies.append(other.get_indicies())
+        self._ohlc = np.concatenate(
+            [self._ohlc, other.get_ohlc_prices()], axis=0)
+        self._volume = np.concatenate(
+            [self._volume, other.get_volume()], axis=0)
+
+        return self
 
     def get_indicies(self) -> pd.DatetimeIndex:
         return self._indicies
