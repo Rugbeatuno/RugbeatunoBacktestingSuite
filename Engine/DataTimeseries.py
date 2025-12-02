@@ -130,6 +130,11 @@ class DataTimeseries:
         start: pd.Timestamp = start_date if start_date else self.get_start_date()
         end: pd.Timestamp = end_date if end_date else self.get_end_date()
 
+        # align timezones
+        start = start.tz_localize(
+            self._timezone) if start.tz is None else start
+        end = end.tz_localize(self._timezone) if end.tz is None else end
+
         start_idx = self._indicies.searchsorted(start, side='left')
         end_idx = self._indicies.searchsorted(end, side='right')
 
@@ -139,6 +144,7 @@ class DataTimeseries:
 
     def split(self, split_date: pd.Timestamp) -> Tuple['DataTimeseries', 'DataTimeseries']:
         # split the currently loaded data
+        split_date = split_date.tz_localize(self._timezone)
         split_idx = self._indicies.searchsorted(split_date)
 
         oos = DataTimeseries()

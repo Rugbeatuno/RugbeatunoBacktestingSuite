@@ -185,7 +185,7 @@ class Backtester:
         self.total_pct_return = self.total_pnl / self.initial_equity - 1
 
     def calculate_raw_buy_hold_return(self) -> float:
-        return self.close_prices[-1] / self.close_prices[0] - 1
+        return self.close_prices[-1] / self.close_prices[0]
 
     def calculate_drawdown_metrics(self):
         equity_max: np.ndarray = np.maximum.accumulate(self.equity_curve)
