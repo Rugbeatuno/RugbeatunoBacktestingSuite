@@ -152,19 +152,39 @@ def plot_price_series(price_series: list, labels: list, pct_of_bars: float = 1, 
     plt.show()
 
 
-def bars_per_year(timeframe: str) -> int:
-    """Return the approximate number of bars per year for a timeframe string."""
+def timeframe_to_minutes(timeframe: str) -> int:
     if timeframe.endswith("min"):
         minutes = int(timeframe.replace("min", ""))
-        return (365.25 * 24 * 60) / minutes
+        return minutes
 
     if timeframe.endswith("H"):
         hours = int(timeframe.replace("H", ""))
-        return (365.25 * 24) / hours
+        return hours * 60
 
     if timeframe.endswith("D"):
         days = int(timeframe.replace("D", ""))
-        return 365.25 / days
+        return 24 * 60 * days
+
+    raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+
+def bars_per_year(timeframe: str) -> int:
+    # just approximate the number of trading days, carver says 256 but in reality 252
+    n_trading_days = 252
+    hours_per_day = 23  # ETH
+    minutes_per_day = hours_per_day * 60
+
+    if timeframe.endswith("min"):
+        minutes = int(timeframe.replace("min", ""))
+        return (n_trading_days * minutes_per_day) / minutes
+
+    if timeframe.endswith("H"):
+        hours = int(timeframe.replace("H", ""))
+        return (n_trading_days * hours_per_day) / hours
+
+    if timeframe.endswith("D"):
+        days = int(timeframe.replace("D", ""))
+        return n_trading_days / days
 
     raise ValueError(f"Unsupported timeframe: {timeframe}")
 

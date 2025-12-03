@@ -2,6 +2,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
+from math import sqrt
 import matplotlib.dates as mdates
 
 from Engine.DataTimeseries import DataTimeseries
@@ -57,12 +58,12 @@ class Backtester:
 
         # equity metrics
         self.initial_equity: float = initial_equity
-        self.end_equity: float = None
+        self.final_equity: float = None
 
         # Signal metrics
         self.signal: np.ndarray = signal
         self.trade_indicies: np.ndarray = np.insert(
-            np.abs(np.diff(self.signal)), 0, 0.0)
+            np.abs(np.diff(self.signal)) / 2, 0, 0.0)
 
         # Return metrics
         self.trade_pnl: np.ndarray = None  # PnL of each candle
@@ -72,9 +73,10 @@ class Backtester:
         self.transaction_costs: np.ndarray = None  # transaction costs per bar
 
         self.total_pct_return: float = None  # (PnL ÷ initial equity)
-        self.total_pnl: float = None  # Total PnL in dollars
+        # Total PnL in dollars (only PnL not initial equity)
+        self.total_pnl: float = None
         self.buyhold_pct_return: float = self.calculate_raw_buy_hold_return()
-        self.buyhold_equity_pnl: float = self.buyhold_pct_return * self.initial_equity
+        self.buyhold_pnl: float = self.buyhold_pct_return * self.initial_equity
 
         self.max_drawdown: float = None
         self.max_drawdown_pct: float = None
@@ -115,8 +117,8 @@ class Backtester:
             self.winning_trades, self.total_trades, 0.05)
         return f'''
         Backtest Results from {self.start_date} to {self.end_date} ({self.duration})
-        Equity:     {dollar_format(self.initial_equity)} -> {dollar_format(self.end_equity)}
-        Buy & Hold: {dollar_format(self.initial_equity)} -> {dollar_format(self.buyhold_equity_pnl)}
+        Equity:     {dollar_format(self.initial_equity)} -> {dollar_format(self.final_equity)}
+        Buy & Hold: {dollar_format(self.initial_equity)} -> {dollar_format(self.initial_equity + self.buyhold_pnl)}
         Buy & Hold Return (%): {percentage_format(self.buyhold_pct_return)}
         Strategy Return (%):   {percentage_format(self.total_pct_return)}
 
@@ -140,8 +142,8 @@ class Backtester:
         Slippage:   {self.slippage_ticks} ticks
         Commission: {dollar_format(self.commission)}
         Contract Multiplier: {dollar_format(self.contract_multiplier)}
+        Transaction Costs:   {dollar_format(self.transaction_costs.sum())}
 
-        Performance Metrics:
         CAGR:              {percentage_format(self.CAGR)}
         Sharpe Ratio:      {number_format(self.sharpe_ratio)}
         Sortino Ratio:     {number_format(self.sortino_ratio)}
@@ -158,8 +160,6 @@ class Backtester:
         self.calculate_winlose_metrics()
         self.calculate_performance_metrics()
 
-    # convert all major calculations into numpy then back to pandas
-
     def quick_backtest(self) -> None:
         if len(self.signal) != len(self.close_prices):
             raise ValueError(
@@ -168,24 +168,24 @@ class Backtester:
         # Handle NaN values introduced by shift
         position = np.roll(self.signal, 1)
         position[0] = 0.0
-        price_diff = np.insert(np.diff(self.close_prices), 0, 0.0)
+        # price_diff = np.insert(np.diff(self.close_prices), 0, 0.0)
+        price_diff = self.close_prices - self.ohlc[:, 0]  # open to close
 
         raw_pnl: np.ndarray = position * price_diff * self.contract_multiplier
         commision_cost: np.ndarray = self.trade_indicies * self.commission
         slippage_cost: np.ndarray = self.trade_indicies * self.slippage_ticks * \
             self.tick_value
-
         self.transaction_costs: np.ndarray = commision_cost + slippage_cost
         self.trade_pnl: np.ndarray = raw_pnl - self.transaction_costs
         self.cum_trade_pnl: np.ndarray = self.trade_pnl.cumsum()
         self.equity_curve: np.ndarray = self.initial_equity + self.cum_trade_pnl
 
-        self.end_equity = self.equity_curve[-1]
-        self.total_pnl = self.initial_equity + self.cum_trade_pnl[-1]
-        self.total_pct_return = self.total_pnl / self.initial_equity - 1
+        self.final_equity = self.equity_curve[-1]
+        self.total_pnl = self.cum_trade_pnl[-1]
+        self.total_pct_return = self.total_pnl / self.initial_equity
 
     def calculate_raw_buy_hold_return(self) -> float:
-        return self.close_prices[-1] / self.close_prices[0]
+        return self.close_prices[-1] / self.close_prices[0] - 1
 
     def calculate_drawdown_metrics(self):
         equity_max: np.ndarray = np.maximum.accumulate(self.equity_curve)
@@ -229,8 +229,10 @@ class Backtester:
         # !todo hard todo because you have to pair the signal to the returns
 
         # overwrite trade_returns to comput max consecutive
-        self.max_consec_wins = get_max_consecutive_streak(winning_trades)
-        self.max_consec_losses = get_max_consecutive_streak(losing_trades)
+        winning_consec = np.where(trade_returns > 0, 1, 0)
+        losing_consec = np.where(trade_returns < 0, 1, 0)
+        self.max_consec_wins = get_max_consecutive_streak(winning_consec)
+        self.max_consec_losses = get_max_consecutive_streak(losing_consec)
 
         self.largest_win = winning_trades.max()
         self.largest_loss = losing_trades.min()
@@ -240,48 +242,45 @@ class Backtester:
             (self.average_loss * (1 - self.win_rate))
 
     def calculate_performance_metrics(self):
-        """Calculate performance metrics using correct timeframe-based annualization."""
+        bars_annually = bars_per_year(self.timeframe)
 
-        # ----------------------------------------------------
-        # 1. Annualization factor from timeframe (bars/year)
-        # ----------------------------------------------------
-        # USE YOUR DATASERIES TIMEFRAME
-        bars_year = bars_per_year(self.timeframe)
-        # ----------------------------------------------------
-        # 2. CAGR (your old version is correct)
-        # ----------------------------------------------------
+        # CAGR
         years = self.duration.days / 365.25
-        self.CAGR = ((self.end_equity / self.initial_equity)
+        self.CAGR = ((self.final_equity / self.initial_equity)
                      ** (1 / years) - 1) if years > 0 else 0.0
-        # ----------------------------------------------------
-        # 3. Sharpe Ratio (correct annualization)
-        # ----------------------------------------------------
-        # per-trade or per-bar? fix below
-        bar_returns = self.trade_pnl / self.initial_equity
 
+        # annualized metrics
+        equity = self.equity_curve
+        bar_returns = np.diff(equity) / equity[:-1]
         mean_ret = bar_returns.mean()
         std_ret = bar_returns.std()
 
-        self.sharpe_ratio = (mean_ret / std_ret) * \
-            np.sqrt(bars_year) if std_ret > 0 else 0.0
+        # sharpe ratio (annualized)
+        if std_ret > 0:
+            self.sharpe_ratio = (mean_ret / std_ret) * np.sqrt(bars_annually)
+        else:
+            self.sharpe_ratio = 0.0
 
-        # ----------------------------------------------------
-        # 4. Sortino Ratio (correct annualization)
-        # ----------------------------------------------------
+        # sortino (annualized)
         downside = bar_returns[bar_returns < 0]
         downside_std = downside.std()
+        if downside_std > 0:
+            self.sortino_ratio = (mean_ret / downside_std) * \
+                np.sqrt(bars_annually)
+        else:
+            self.sortino_ratio = 0.0
 
-        self.sortino_ratio = (mean_ret / downside_std) * \
-            np.sqrt(bars_year) if downside_std > 0 else 0.0
-
-        # ----------------------------------------------------
-        # 5. Profit Factor (your version was correct)
-        # ----------------------------------------------------
+        # profit factor
         total_gains = self.trade_pnl[self.trade_pnl > 0].sum()
         total_losses = -self.trade_pnl[self.trade_pnl < 0].sum()
+        if total_losses > 0:
+            self.profit_factor = total_gains / total_losses
+        else:
+            self.profit_factor = float('inf')
 
-        self.profit_factor = total_gains / \
-            total_losses if total_losses > 0 else float('inf')
+        # self.annualized_return = (1 + mean_ret) ** bars_annually - 1
+        # self.annualized_vol = std_ret * np.sqrt(bars_annually)
+        # print(self.annualized_return, self.annualized_vol)
 
     def generate_equity_curve(self) -> EquityCurve:
         return EquityCurve(self.equity_curve, self.drawdown_curve, self.trade_indicies, self.indicies)
