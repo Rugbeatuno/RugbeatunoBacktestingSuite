@@ -58,7 +58,6 @@ class DataTimeseries:
 
         self._indicies: pd.DatetimeIndex = None
         self._ohlc: np.ndarray = None
-        self._volume: np.ndarray = None
 
         self._load_data()
 
@@ -71,7 +70,7 @@ class DataTimeseries:
 
         # required columns
         required = ["Time", "Open", "High",
-                    "Low", "Close", "Volume"]
+                    "Low", "Close"]  # dont require volume
         missing = [c for c in required if c not in df.columns]
         if missing:
             raise ValueError("Missing required columns: {}".format(missing))
@@ -99,7 +98,6 @@ class DataTimeseries:
 
         self._indicies = df.index
         self._ohlc = df[['Open', 'High', 'Low', 'Close']].values
-        self._volume = df[['Volume']].values
 
     def convert_timezone(self, timezone: str):
         assert timezone in self.TIMEZONES, f"Invalid timezone '{timezone}'"
@@ -112,19 +110,18 @@ class DataTimeseries:
 
         # --- 1. CONVERT BACK TO TEMPORARY PANDAS DATAFRAME ---
         # The index (self.indicies) is necessary for resampling
-        temp_df = self.get_close_prices_series()
+        temp_df = self.get_ohlc_prices_series()
         temp_df = temp_df.resample(timeframe, label='right', closed='left').agg({
             'Open': 'first',
             'High': 'max',
             'Low': 'min',
-            'Close': 'last',
-            'Volume': 'sum',
+            'Close': 'last'
+            # 'Volume': 'sum',
         }).dropna()
 
         self._timeframe = timeframe
         self._indicies = temp_df.index
         self._ohlc = temp_df[['Open', 'High', 'Low', 'Close']].values
-        self._volume = temp_df[['Volume']].values
 
     def slice(self, start_date: pd.Timestamp = None, end_date: pd.Timestamp = None) -> None:
         start: pd.Timestamp = start_date if start_date else self.get_start_date()
@@ -140,7 +137,6 @@ class DataTimeseries:
 
         self._indicies = self._indicies[start_idx:end_idx]
         self._ohlc = self._ohlc[start_idx:end_idx]
-        self._volume = self._volume[start_idx:end_idx]
 
     def split(self, split_date: pd.Timestamp) -> Tuple['DataTimeseries', 'DataTimeseries']:
         # split the currently loaded data
@@ -150,14 +146,12 @@ class DataTimeseries:
         oos = DataTimeseries()
         oos._indicies = self._indicies[split_idx:]
         oos._ohlc = self._ohlc[split_idx:]
-        oos._volume = self._volume[split_idx:]
         oos._timeframe = self._timeframe
         oos._timezone = self._timezone
         oos._filepath = self._filepath
 
         self._indicies = self._indicies[:split_idx]
         self._ohlc = self._ohlc[:split_idx]
-        self._volume = self._volume[:split_idx]
 
         return self, oos
 
@@ -185,8 +179,6 @@ class DataTimeseries:
         self._indicies = self._indicies.append(other.get_indicies())
         self._ohlc = np.concatenate(
             [self._ohlc, other.get_ohlc_prices()], axis=0)
-        self._volume = np.concatenate(
-            [self._volume, other.get_volume()], axis=0)
 
         return self
 
@@ -214,7 +206,6 @@ class DataTimeseries:
             index=self._indicies,
             columns=['Open', 'High', 'Low', 'Close']
         )
-        df['Volume'] = self._volume
 
         return df
 
@@ -273,7 +264,7 @@ class DataTimeseries:
         # RTH mask 09:30–16:00
         rth_mask = (hours > 9) & (hours < 16) | (
             (hours == 9) & (minutes >= 30))
-        # rth_mask |= (hours == 16) & (minutes == 0)    # allow 16:00 exact close
+        rth_mask |= (hours == 16) & (minutes == 0)    # allow 16:00 exact close
 
         rth_mask = rth_mask & ~gap_mask
         eth_mask = ~rth_mask & ~gap_mask

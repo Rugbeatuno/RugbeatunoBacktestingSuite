@@ -40,6 +40,8 @@ class Backtester:
         assert contract_multiplier / \
             4 == tick_value, "Tick value must be one-fourth of contract multiplier for quarter-point ticks."
         assert ohlc.shape[1] == 4, "OHLC data must have 4 columns (Open, High, Low, Close)."
+        assert initial_equity > 0
+        assert timeframe in DataTimeseries.TIMEFRAMES
 
         # DataTimeseries initialization, closing prices, start, end
         self.ohlc: np.ndarray = ohlc
@@ -111,8 +113,11 @@ class Backtester:
 
         # self.alpha: float = None
         # self.beta: float = None
+        self.backtest_ran = False
 
     def __str__(self):
+        assert self.backtest_ran
+
         mu, lb, ub = confidence_interval(
             self.winning_trades, self.total_trades, 0.05)
         return f'''
@@ -184,6 +189,8 @@ class Backtester:
         self.total_pnl = self.cum_trade_pnl[-1]
         self.total_pct_return = self.total_pnl / self.initial_equity
 
+        self.backtest_ran = True
+
     def calculate_raw_buy_hold_return(self) -> float:
         return self.close_prices[-1] / self.close_prices[0] - 1
 
@@ -219,11 +226,26 @@ class Backtester:
         self.winning_trades = len(winning_trades)
         self.losing_trades = len(losing_trades)
         self.total_trades = len(trade_returns)
-        self.win_rate = self.winning_trades / self.total_trades
 
-        self.average_win = winning_trades.sum() / self.winning_trades
-        self.average_loss = losing_trades.sum() / self.losing_trades
-        self.ratio_avg_win_loss = self.average_win / -self.average_loss  # flip positive
+        if self.total_trades != 0:
+            self.win_rate = self.winning_trades / self.total_trades
+        else:
+            self.win_rate = np.nan
+
+        if self.winning_trades != 0:
+            self.average_win = winning_trades.sum() / self.winning_trades
+        else:
+            self.average_win = np.nan
+
+        if self.losing_trades != 0:
+            self.average_loss = losing_trades.sum() / self.losing_trades
+        else:
+            self.average_loss = np.nan
+
+        if self.average_loss != 0:
+            self.ratio_avg_win_loss = self.average_win / -self.average_loss  # flip positive
+        else:
+            self.ratio_avg_win_loss = np.nan
 
         # !todo missing calculation for the number of winning long trades vs winning short trades
         # !todo hard todo because you have to pair the signal to the returns
@@ -234,12 +256,24 @@ class Backtester:
         self.max_consec_wins = get_max_consecutive_streak(winning_consec)
         self.max_consec_losses = get_max_consecutive_streak(losing_consec)
 
-        self.largest_win = winning_trades.max()
-        self.largest_loss = losing_trades.min()
+        if self.winning_trades > 0:
+            self.largest_win = winning_trades.max()
+        else:
+            self.largest_win = np.nan
+
+        if self.losing_trades > 0:
+            self.largest_loss = losing_trades.min()
+        else:
+            self.largest_loss = np.nan
 
         # average loss stored as negative
-        self.expected_value = (self.average_win * self.win_rate) + \
-            (self.average_loss * (1 - self.win_rate))
+        if np.isnan(self.win_rate) or np.isnan(self.average_win) or np.isnan(self.average_loss):
+            self.expected_value = np.nan
+        else:
+            self.expected_value = (
+                self.win_rate * self.average_win +
+                (1 - self.win_rate) * self.average_loss
+            )
 
     def calculate_performance_metrics(self):
         bars_annually = bars_per_year(self.timeframe)

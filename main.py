@@ -15,7 +15,7 @@ EMSD_LONG_WEIGHT = 0.3
 EMSD_SHORT_LENGTH = 64
 EMSD_LONG_LENGTH = 256
 
-data = DataTimeseries('./Data/nq_continous.csv', 'NQ')
+data = DataTimeseries('./Data/nq_continous.csv')
 data.convert_timezone('America/New_York')
 data.resample_data('5min')
 close: pd.Series = data.get_close_prices_series()
@@ -105,7 +105,7 @@ signal_series = pd.Series(signal, index=df.index)
 print(len(signal_series))
 backtester = Backtester(
     data.get_ohlc_prices(),
-    data.indicies,
+    data.get_indicies(),
     signal_series.values,
     timeframe='1min',
     tick_value=0.5,
