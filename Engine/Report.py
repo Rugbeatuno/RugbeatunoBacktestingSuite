@@ -1,0 +1,558 @@
+import numpy as np
+import pandas as pd
+import plotly.graph_objects as go
+import webbrowser
+from pathlib import Path
+
+from Engine.Utils import confidence_interval, confidence_interval_mean
+
+
+def generate_report(bt, output_path: str = 'backtest_report.html', open_browser: bool = True):
+    assert bt.backtest_ran, "Run full_backtest() before generating report"
+
+    # --- Compute stats ---
+    trade_groups = bt.trade_indicies.cumsum()
+    trade_returns = pd.Series(bt.trade_pnl).groupby(trade_groups).sum().values
+
+    # Win rate CI (Wilson score)
+    _, wr_lb_95, wr_ub_95 = confidence_interval(
+        bt.winning_trades, bt.total_trades, 0.05)
+    _, wr_lb_997, wr_ub_997 = confidence_interval(
+        bt.winning_trades, bt.total_trades, 0.003)
+
+    # EV confidence intervals (t-distribution)
+    ev_mean = trade_returns.mean()
+    ev_std = trade_returns.std()
+    n_trades = len(trade_returns)
+    _, ev_lb_95, ev_ub_95 = confidence_interval_mean(
+        ev_mean, ev_std, n_trades, alpha=0.05)
+    _, ev_lb_997, ev_ub_997 = confidence_interval_mean(
+        ev_mean, ev_std, n_trades, alpha=0.003)
+
+    # Buy & hold equity curve
+    shares = bt.initial_equity / bt.close_prices[0]
+    buyhold_equity = shares * bt.close_prices
+
+    # Downsample for plotting
+    step = max(1, len(bt.equity_curve) // 2000)
+    plot_indices = bt.indicies[::step]
+    plot_equity = bt.equity_curve[::step]
+    plot_buyhold = buyhold_equity[::step]
+    plot_drawdown = bt.drawdown_curve[::step]
+
+    # Date range string
+    start_str = bt.start_date.strftime('%Y-%m-%d')
+    end_str = bt.end_date.strftime('%Y-%m-%d')
+    date_range_str = f'{start_str}  —  {end_str}'
+
+    # --- Build Plotly figures ---
+
+    # 1. Main equity chart
+    fig_equity = go.Figure()
+    fig_equity.add_trace(go.Scatter(
+        x=plot_indices, y=plot_equity,
+        name='Strategy', line=dict(color='#2196F3', width=1.5),
+        hovertemplate='%{x}<br>Equity: $%{y:,.2f}<extra></extra>'
+    ))
+    fig_equity.add_trace(go.Scatter(
+        x=plot_indices, y=plot_buyhold,
+        name='Buy & Hold', line=dict(color='#9E9E9E', width=1, dash='dot'),
+        hovertemplate='%{x}<br>B&H: $%{y:,.2f}<extra></extra>'
+    ))
+    fig_equity.update_layout(
+        margin=dict(l=50, r=20, t=40, b=40),
+        legend=dict(x=0.01, y=0.99, bgcolor='rgba(0,0,0,0)'),
+        hovermode='x unified',
+        xaxis=dict(showgrid=True, gridcolor='#2a2a2a'),
+        yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
+        paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
+        font=dict(color='#e0e0e0'),
+        annotations=[dict(
+            text=date_range_str,
+            xref='paper', yref='paper',
+            x=0.0, y=1.02,
+            showarrow=False,
+            font=dict(size=12, color='#aaa'),
+            xanchor='left', yanchor='bottom',
+        )],
+    )
+
+    # 2. Drawdown chart
+    fig_drawdown = go.Figure()
+    fig_drawdown.add_trace(go.Scatter(
+        x=plot_indices, y=plot_drawdown,
+        fill='tozeroy', fillcolor='rgba(244,67,54,0.3)',
+        line=dict(color='#f44336', width=1),
+        hovertemplate='%{x}<br>Drawdown: $%{y:,.2f}<extra></extra>'
+    ))
+    fig_drawdown.update_layout(
+        margin=dict(l=50, r=20, t=30, b=40),
+        hovermode='x unified',
+        xaxis=dict(showgrid=True, gridcolor='#2a2a2a'),
+        yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
+        paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
+        font=dict(color='#e0e0e0'),
+    )
+
+    # --- Convert figures to HTML divs ---
+    equity_html = fig_equity.to_html(
+        full_html=False, include_plotlyjs=False, div_id='equity-chart',
+        config={'responsive': True})
+    drawdown_html = fig_drawdown.to_html(
+        full_html=False, include_plotlyjs=False, div_id='drawdown-chart',
+        config={'responsive': True})
+
+    # --- Helpers ---
+    def _fmt_dollar(v):
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return 'N/A'
+        return f'${v:,.2f}'
+
+    def _fmt_pct(v):
+        if v is None or (isinstance(v, float) and np.isnan(v)):
+            return 'N/A'
+        return f'{v * 100:.2f}%'
+
+    # Drawdown duration formatting
+    dd_duration = bt.max_drawdown_duration
+    if hasattr(dd_duration, 'days'):
+        dd_dur_str = f'{dd_duration.days}d {dd_duration.seconds // 3600}h {(dd_duration.seconds % 3600) // 60}m'
+    else:
+        dd_dur_str = str(dd_duration)
+
+    # --- EV box (top right) ---
+    ev_html = f'''
+    <div class="ev-section">
+        <h3>Expected Value per Trade</h3>
+        <div class="ev-big {'positive' if ev_mean >= 0 else 'negative'}">{_fmt_dollar(ev_mean)}</div>
+        <div class="ci-block">
+            <div class="ci-label">95% Confidence Interval</div>
+            <div class="ci-range">{_fmt_dollar(ev_lb_95)} — {_fmt_dollar(ev_ub_95)}</div>
+            <div class="ci-bar">
+                <div class="ci-fill ci-95"></div>
+                <div class="ci-marker"></div>
+            </div>
+        </div>
+        <div class="ci-block">
+            <div class="ci-label">99.7% Confidence Interval</div>
+            <div class="ci-range">{_fmt_dollar(ev_lb_997)} — {_fmt_dollar(ev_ub_997)}</div>
+            <div class="ci-bar">
+                <div class="ci-fill ci-997"></div>
+                <div class="ci-marker"></div>
+            </div>
+        </div>
+        <div class="ev-substat">
+            <span class="stat-label">n = {n_trades:,} trades</span>
+            <span class="stat-label">std = {_fmt_dollar(ev_std)}</span>
+        </div>
+    </div>
+    '''
+
+    # --- Stats panel ---
+    stats_html = f'''
+    <div class="stats-grid">
+        <div class="stat-section">
+            <h3>Equity</h3>
+            <div class="stat-row">
+                <span class="stat-label">Initial</span>
+                <span class="stat-value">{_fmt_dollar(bt.initial_equity)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Final</span>
+                <span class="stat-value {'positive' if bt.final_equity >= bt.initial_equity else 'negative'}">{_fmt_dollar(bt.final_equity)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Strategy Return</span>
+                <span class="stat-value {'positive' if bt.total_pct_return >= 0 else 'negative'}">{_fmt_pct(bt.total_pct_return)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Buy & Hold Return</span>
+                <span class="stat-value">{_fmt_pct(bt.buyhold_pct_return)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">CAGR</span>
+                <span class="stat-value">{_fmt_pct(bt.CAGR)}</span>
+            </div>
+        </div>
+
+        <div class="stat-section">
+            <h3>Trades</h3>
+            <div class="stat-row">
+                <span class="stat-label">Total Trades</span>
+                <span class="stat-value">{bt.total_trades:,}</span>
+            </div>
+            <div class="stat-row highlight">
+                <span class="stat-label">Win Rate</span>
+                <span class="stat-value">{_fmt_pct(bt.win_rate)}</span>
+            </div>
+            <div class="stat-row ci-row">
+                <span class="stat-label">95% CI</span>
+                <span class="stat-value ci">{_fmt_pct(wr_lb_95)} — {_fmt_pct(wr_ub_95)}</span>
+            </div>
+            <div class="stat-row ci-row">
+                <span class="stat-label">99.7% CI</span>
+                <span class="stat-value ci">{_fmt_pct(wr_lb_997)} — {_fmt_pct(wr_ub_997)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Avg Win</span>
+                <span class="stat-value positive">{_fmt_dollar(bt.average_win)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Avg Loss</span>
+                <span class="stat-value negative">{_fmt_dollar(bt.average_loss)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Win/Loss Ratio</span>
+                <span class="stat-value">{bt.ratio_avg_win_loss:.2f}</span>
+            </div>
+        </div>
+
+        <div class="stat-section">
+            <h3>Extremes</h3>
+            <div class="stat-row">
+                <span class="stat-label">Largest Win</span>
+                <span class="stat-value positive">{_fmt_dollar(bt.largest_win)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Largest Loss</span>
+                <span class="stat-value negative">{_fmt_dollar(bt.largest_loss)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Max Consec Wins</span>
+                <span class="stat-value">{bt.max_consec_wins}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Max Consec Losses</span>
+                <span class="stat-value">{bt.max_consec_losses}</span>
+            </div>
+        </div>
+
+        <div class="stat-section">
+            <h3>Max Drawdown</h3>
+            <div class="stat-row">
+                <span class="stat-label">Drawdown</span>
+                <span class="stat-value negative">{_fmt_dollar(bt.max_drawdown)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Drawdown %</span>
+                <span class="stat-value negative">{_fmt_pct(bt.max_drawdown_pct)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Duration</span>
+                <span class="stat-value">{dd_dur_str}</span>
+            </div>
+        </div>
+
+        <div class="stat-section">
+            <h3>Performance</h3>
+            <div class="stat-row">
+                <span class="stat-label">Sharpe Ratio</span>
+                <span class="stat-value">{bt.sharpe_ratio:.2f}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Sortino Ratio</span>
+                <span class="stat-value">{bt.sortino_ratio:.2f}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Profit Factor</span>
+                <span class="stat-value">{bt.profit_factor:.2f}</span>
+            </div>
+        </div>
+
+        <div class="stat-section">
+            <h3>Costs</h3>
+            <div class="stat-row">
+                <span class="stat-label">Slippage</span>
+                <span class="stat-value">{bt.slippage_ticks} ticks</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Commission</span>
+                <span class="stat-value">{_fmt_dollar(bt.commission)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Total Costs</span>
+                <span class="stat-value negative">{_fmt_dollar(float(bt.transaction_costs.sum()))}</span>
+            </div>
+        </div>
+    </div>
+    '''
+
+    # --- Assemble full HTML ---
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Backtest Report</title>
+    <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            background: #0d0d0d;
+            color: #e0e0e0;
+            font-family: 'Segoe UI', -apple-system, sans-serif;
+            padding: 20px 24px;
+        }}
+
+        .container {{
+            width: 100%;
+            max-width: 100%;
+        }}
+
+        .top-row {{
+            display: grid;
+            grid-template-columns: 3fr 1fr;
+            gap: 12px;
+            margin-bottom: 12px;
+            height: 420px;
+        }}
+
+        .panel {{
+            background: #1a1a1a;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 12px;
+            overflow: hidden;
+        }}
+
+        .panel-title {{
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 8px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #2a2a2a;
+        }}
+
+        /* Make plotly charts fill their panel */
+        .chart-panel {{
+            display: flex;
+            flex-direction: column;
+        }}
+        .chart-panel .panel-title {{
+            flex-shrink: 0;
+        }}
+        .chart-panel .js-plotly-plot,
+        .chart-panel .plotly-graph-div {{
+            width: 100% !important;
+            height: 100% !important;
+            flex: 1;
+        }}
+
+        /* Stats panel */
+        .stats-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            padding: 10px;
+        }}
+
+        .stat-section h3 {{
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #666;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #2a2a2a;
+        }}
+
+        .stat-row {{
+            display: flex;
+            justify-content: space-between;
+            padding: 4px 0;
+            font-size: 13px;
+        }}
+
+        .stat-label {{ color: #999; }}
+        .stat-value {{ font-weight: 500; font-variant-numeric: tabular-nums; }}
+        .stat-value.positive {{ color: #4CAF50; }}
+        .stat-value.negative {{ color: #f44336; }}
+        .stat-value.ci {{ color: #FF9800; font-size: 12px; }}
+
+        .stat-row.highlight {{
+            background: #222;
+            padding: 6px 8px;
+            border-radius: 4px;
+            margin: 4px -8px;
+        }}
+
+        .stat-row.ci-row {{
+            padding-left: 12px;
+        }}
+
+        /* EV section */
+        .ev-section {{
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }}
+
+        .ev-section h3 {{
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 12px;
+            text-align: center;
+        }}
+
+        .ev-big {{
+            font-size: 36px;
+            font-weight: 700;
+            text-align: center;
+            margin: 8px 0 24px;
+        }}
+        .ev-big.positive {{ color: #4CAF50; }}
+        .ev-big.negative {{ color: #f44336; }}
+
+        .ev-substat {{
+            display: flex;
+            justify-content: space-between;
+            margin-top: 16px;
+            padding-top: 12px;
+            border-top: 1px solid #2a2a2a;
+            font-size: 12px;
+        }}
+
+        .ci-block {{
+            margin: 10px 0;
+            padding: 10px;
+            background: #1a1a1a;
+            border-radius: 6px;
+        }}
+
+        .ci-label {{
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #888;
+            margin-bottom: 4px;
+        }}
+
+        .ci-range {{
+            font-size: 15px;
+            font-weight: 500;
+            color: #FF9800;
+            margin-bottom: 8px;
+        }}
+
+        .ci-bar {{
+            height: 6px;
+            background: #333;
+            border-radius: 3px;
+            position: relative;
+            overflow: hidden;
+        }}
+
+        .ci-fill {{
+            position: absolute;
+            height: 100%;
+            border-radius: 3px;
+        }}
+
+        .ci-fill.ci-95 {{
+            background: rgba(255, 152, 0, 0.5);
+            left: 15%;
+            right: 15%;
+        }}
+
+        .ci-fill.ci-997 {{
+            background: rgba(255, 152, 0, 0.3);
+            left: 5%;
+            right: 5%;
+        }}
+
+        .ci-marker {{
+            position: absolute;
+            top: -2px;
+            left: 50%;
+            width: 3px;
+            height: 10px;
+            background: #FF9800;
+            border-radius: 2px;
+            transform: translateX(-50%);
+        }}
+
+        /* Below fold */
+        .below-fold {{
+            margin-top: 12px;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }}
+
+        .below-fold .panel {{
+            height: 300px;
+        }}
+
+        @media (max-width: 1000px) {{
+            .top-row {{
+                grid-template-columns: 1fr;
+                height: auto;
+            }}
+            .top-row .chart-panel {{
+                height: 350px;
+            }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Top row: equity chart left, EV box right -->
+        <div class="top-row">
+            <div class="panel chart-panel">
+                <div class="panel-title">Strategy vs Buy & Hold</div>
+                {equity_html}
+            </div>
+            <div class="panel" style="padding: 0;">
+                {ev_html}
+            </div>
+        </div>
+
+        <!-- Stats panel -->
+        <div class="panel" style="margin-bottom: 12px;">
+            <div class="panel-title">Backtest Statistics</div>
+            {stats_html}
+        </div>
+
+        <!-- Below fold charts -->
+        <div class="below-fold">
+            <div class="panel chart-panel">
+                <div class="panel-title">Drawdown</div>
+                {drawdown_html}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        window.addEventListener('resize', function() {{
+            document.querySelectorAll('.js-plotly-plot').forEach(function(plot) {{
+                Plotly.Plots.resize(plot);
+            }});
+        }});
+        setTimeout(function() {{
+            document.querySelectorAll('.js-plotly-plot').forEach(function(plot) {{
+                Plotly.Plots.resize(plot);
+            }});
+        }}, 100);
+    </script>
+</body>
+</html>'''
+
+    output_path = str(Path(output_path).resolve())
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(html)
+
+    print(f'Report saved: {output_path}')
+
+    if open_browser:
+        webbrowser.open(f'file:///{output_path}')
+
+    return output_path

@@ -37,8 +37,6 @@ class Backtester:
             signal), "OHLC data and signal length must match."
         assert len(indicies) == len(
             ohlc), "Indicies length must match OHLC data length."
-        assert contract_multiplier / \
-            4 == tick_value, "Tick value must be one-fourth of contract multiplier for quarter-point ticks."
         assert ohlc.shape[1] == 4, "OHLC data must have 4 columns (Open, High, Low, Close)."
         assert initial_equity > 0
         assert timeframe in DataTimeseries.TIMEFRAMES
@@ -55,6 +53,7 @@ class Backtester:
         # Backtesting hyperparameter metrics
         self.tick_value: float = tick_value  # dollar equivalent for 1 tick move
         self.contract_multiplier: float = contract_multiplier  # $ equivalent for 1 point
+        self.ticks_per_point: float = self.contract_multiplier / self.tick_value
         self.slippage_ticks: float = slippage_ticks
         self.commission: float = commission
 
@@ -173,8 +172,11 @@ class Backtester:
         # Handle NaN values introduced by shift
         position = np.roll(self.signal, 1)
         position[0] = 0.0
-        # price_diff = np.insert(np.diff(self.close_prices), 0, 0.0)
-        price_diff = self.close_prices - self.ohlc[:, 0]  # open to close
+        close_to_close = np.diff(
+            self.close_prices, prepend=self.close_prices[0])
+        open_to_close = self.close_prices - self.ohlc[:, 0]
+        entered_this_bar = self.trade_indicies > 0
+        price_diff = np.where(entered_this_bar, open_to_close, close_to_close)
 
         raw_pnl: np.ndarray = position * price_diff * self.contract_multiplier
         commision_cost: np.ndarray = self.trade_indicies * self.commission
@@ -192,14 +194,20 @@ class Backtester:
         self.backtest_ran = True
 
     def calculate_raw_buy_hold_return(self) -> float:
-        return self.close_prices[-1] / self.close_prices[0] - 1
+        point_move = self.close_prices[-1] - self.close_prices[0]
+        return (point_move * self.contract_multiplier) / self.initial_equity
 
     def calculate_drawdown_metrics(self):
         equity_max: np.ndarray = np.maximum.accumulate(self.equity_curve)
 
         self.drawdown_curve = self.equity_curve - equity_max
         self.max_drawdown = self.drawdown_curve.min()  # most negative value
-        self.max_drawdown_pct = self.max_drawdown / self.equity_curve.max()
+
+        end_index_location: int = np.argmin(self.drawdown_curve)
+        start_index_location: int = np.argmax(
+            self.equity_curve[:end_index_location])
+        self.max_drawdown_pct = self.max_drawdown / \
+            self.equity_curve[start_index_location]
 
         end_index_location: int = np.argmin(self.drawdown_curve)
 
