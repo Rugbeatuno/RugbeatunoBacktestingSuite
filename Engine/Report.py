@@ -94,13 +94,71 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         font=dict(color='#e0e0e0'),
     )
 
-    # --- Convert figures to HTML divs ---
-    equity_html = fig_equity.to_html(
-        full_html=False, include_plotlyjs=False, div_id='equity-chart',
-        config={'responsive': True})
-    drawdown_html = fig_drawdown.to_html(
-        full_html=False, include_plotlyjs=False, div_id='drawdown-chart',
-        config={'responsive': True})
+    # 3. Bootstrap MC Resampling
+    mc_data = bt.bootstrap_mc_resampling(
+        iterations=10000, max_paths=100, max_points=100)
+
+    # Left panel: equity paths
+    fig_mc_paths = go.Figure()
+    for i in range(mc_data['paths'].shape[0]):
+        fig_mc_paths.add_trace(go.Scatter(
+            x=mc_data['path_x'], y=mc_data['paths'][i],
+            mode='lines', line=dict(color='rgba(100,100,100,0.25)', width=0.7),
+            hoverinfo='skip', showlegend=False,
+        ))
+    fig_mc_paths.add_trace(go.Scatter(
+        x=mc_data['path_x'], y=mc_data['original_path'],
+        mode='lines', line=dict(color='#2196F3', width=2.5),
+        name='Original', hovertemplate='Trade %{x}<br>PnL: $%{y:,.2f}<extra></extra>',
+    ))
+    fig_mc_paths.update_layout(
+        margin=dict(l=50, r=20, t=30, b=40),
+        hovermode='x unified',
+        xaxis=dict(title='Trade #', showgrid=True, gridcolor='#2a2a2a'),
+        yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
+        paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
+        font=dict(color='#e0e0e0'),
+        legend=dict(x=0.01, y=0.99, bgcolor='rgba(0,0,0,0)'),
+    )
+
+    # Right panel: histogram of final PnLs
+    fig_mc_hist = go.Figure()
+    fig_mc_hist.add_trace(go.Histogram(
+        x=mc_data['final_pnls'], nbinsx=80,
+        marker=dict(color='rgba(156, 39, 176, 0.6)', line=dict(
+            color='rgba(156, 39, 176, 0.9)', width=0.5)),
+        hovertemplate='PnL: $%{x:,.0f}<br>Count: %{y}<extra></extra>',
+    ))
+    # Original PnL line
+    fig_mc_hist.add_vline(x=mc_data['original_final_pnl'], line=dict(color='#2196F3', width=2.5),
+                          annotation_text='Original', annotation_position='top')
+    # Mean line
+    fig_mc_hist.add_vline(x=mc_data['mean_pnl'], line=dict(color='#FF9800', width=2, dash='dash'),
+                          annotation_text='Mean', annotation_position='top')
+    # 95% CI
+    fig_mc_hist.add_vrect(x0=mc_data['ci_95'][0], x1=mc_data['ci_95'][1],
+                          fillcolor='rgba(76, 175, 80, 0.12)', line_width=0,
+                          annotation_text='95% CI', annotation_position='top left')
+    fig_mc_hist.add_vline(x=mc_data['ci_95'][0], line=dict(
+        color='#4CAF50', width=1.5, dash='dot'))
+    fig_mc_hist.add_vline(x=mc_data['ci_95'][1], line=dict(
+        color='#4CAF50', width=1.5, dash='dot'))
+    # 99.7% CI
+    fig_mc_hist.add_vline(x=mc_data['ci_997'][0], line=dict(
+        color='#f44336', width=1, dash='dashdot'))
+    fig_mc_hist.add_vline(x=mc_data['ci_997'][1], line=dict(
+        color='#f44336', width=1, dash='dashdot'))
+
+    fig_mc_hist.update_layout(
+        margin=dict(l=50, r=20, t=30, b=60),
+        xaxis=dict(title='Final PnL ($)', showgrid=True,
+                   gridcolor='#2a2a2a', tickprefix='$', tickformat=',.0f',
+                   showticklabels=True, tickangle=-30, tickfont=dict(size=11)),
+        yaxis=dict(title='Frequency', showgrid=True, gridcolor='#2a2a2a'),
+        paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
+        font=dict(color='#e0e0e0'),
+        showlegend=False,
+    )
 
     # --- Helpers ---
     def _fmt_dollar(v):
@@ -112,6 +170,48 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         if v is None or (isinstance(v, float) and np.isnan(v)):
             return 'N/A'
         return f'{v * 100:.2f}%'
+
+    # MC CI text panel
+    mc_ci_html = f'''
+    <div class="mc-ci-section">
+        <h3>Bootstrap Confidence Interval</h3>
+        <div class="mc-ci-big {'positive' if mc_data['mean_pnl'] >= 0 else 'negative'}">{_fmt_dollar(mc_data['mean_pnl'])}</div>
+        <div class="mc-ci-block">
+            <div class="mc-ci-label">95% Confidence Interval</div>
+            <div class="mc-ci-range ci-95-color">{_fmt_dollar(mc_data['ci_95'][0])} — {_fmt_dollar(mc_data['ci_95'][1])}</div>
+            <div class="mc-ci-bar">
+                <div class="mc-ci-fill-95"></div>
+                <div class="mc-ci-marker"></div>
+            </div>
+        </div>
+        <div class="mc-ci-block">
+            <div class="mc-ci-label">99.7% Confidence Interval</div>
+            <div class="mc-ci-range ci-997-color">{_fmt_dollar(mc_data['ci_997'][0])} — {_fmt_dollar(mc_data['ci_997'][1])}</div>
+            <div class="mc-ci-bar">
+                <div class="mc-ci-fill-997"></div>
+                <div class="mc-ci-marker"></div>
+            </div>
+        </div>
+        <div class="mc-ci-substat">
+            <span>{mc_data['iterations']:,} iterations</span>
+            <span>{mc_data['n_trades']:,} trades</span>
+        </div>
+    </div>
+    '''
+
+    # --- Convert figures to HTML divs ---
+    equity_html = fig_equity.to_html(
+        full_html=False, include_plotlyjs=False, div_id='equity-chart',
+        config={'responsive': True})
+    drawdown_html = fig_drawdown.to_html(
+        full_html=False, include_plotlyjs=False, div_id='drawdown-chart',
+        config={'responsive': True})
+    mc_paths_html = fig_mc_paths.to_html(
+        full_html=False, include_plotlyjs=False, div_id='mc-paths-chart',
+        config={'responsive': True})
+    mc_hist_html = fig_mc_hist.to_html(
+        full_html=False, include_plotlyjs=False, div_id='mc-hist-chart',
+        config={'responsive': True})
 
     # Drawdown duration formatting
     dd_duration = bt.max_drawdown_duration
@@ -492,6 +592,118 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             height: 300px;
         }}
 
+        /* Monte Carlo section */
+        .mc-row {{
+            margin-top: 12px;
+            display: grid;
+            grid-template-columns: 2fr 2fr 1fr;
+            gap: 12px;
+        }}
+
+        .mc-row .panel {{
+            height: 420px;
+        }}
+
+        /* MC CI text panel */
+        .mc-ci-section {{
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }}
+
+        .mc-ci-section h3 {{
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 12px;
+            text-align: center;
+        }}
+
+        .mc-ci-big {{
+            font-size: 28px;
+            font-weight: 700;
+            text-align: center;
+            margin: 6px 0 20px;
+        }}
+        .mc-ci-big.positive {{ color: #4CAF50; }}
+        .mc-ci-big.negative {{ color: #f44336; }}
+
+        .mc-ci-block {{
+            margin: 8px 0;
+            padding: 10px;
+            background: #1a1a1a;
+            border-radius: 6px;
+        }}
+
+        .mc-ci-label {{
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #888;
+            margin-bottom: 4px;
+        }}
+
+        .mc-ci-range {{
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 6px;
+        }}
+        .mc-ci-range.ci-95-color {{ color: #4CAF50; }}
+        .mc-ci-range.ci-997-color {{ color: #f44336; }}
+
+        .mc-ci-bar {{
+            height: 6px;
+            background: #333;
+            border-radius: 3px;
+            position: relative;
+            overflow: hidden;
+        }}
+
+        .mc-ci-fill-95 {{
+            position: absolute;
+            height: 100%;
+            border-radius: 3px;
+            background: rgba(76, 175, 80, 0.5);
+            left: 15%;
+            right: 15%;
+        }}
+
+        .mc-ci-fill-997 {{
+            position: absolute;
+            height: 100%;
+            border-radius: 3px;
+            background: rgba(244, 67, 54, 0.3);
+            left: 5%;
+            right: 5%;
+        }}
+
+        .mc-ci-marker {{
+            position: absolute;
+            top: -2px;
+            left: 50%;
+            width: 3px;
+            height: 10px;
+            background: #2196F3;
+            border-radius: 2px;
+            transform: translateX(-50%);
+        }}
+
+        .mc-ci-substat {{
+            display: flex;
+            justify-content: space-between;
+            margin-top: 14px;
+            padding-top: 10px;
+            border-top: 1px solid #2a2a2a;
+            font-size: 11px;
+            color: #999;
+        }}
+
         @media (max-width: 1000px) {{
             .top-row {{
                 grid-template-columns: 1fr;
@@ -527,6 +739,21 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             <div class="panel chart-panel">
                 <div class="panel-title">Drawdown</div>
                 {drawdown_html}
+            </div>
+        </div>
+
+        <!-- Monte Carlo Bootstrap Section -->
+        <div class="mc-row">
+            <div class="panel chart-panel">
+                <div class="panel-title">Bootstrapped MC Resampling — Equity Paths</div>
+                {mc_paths_html}
+            </div>
+            <div class="panel chart-panel">
+                <div class="panel-title">Bootstrapped MC Resampling — Distribution</div>
+                {mc_hist_html}
+            </div>
+            <div class="panel" style="padding: 0;">
+                {mc_ci_html}
             </div>
         </div>
     </div>

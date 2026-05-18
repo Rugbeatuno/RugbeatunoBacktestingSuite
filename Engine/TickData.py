@@ -36,49 +36,30 @@ class TickData:
     def _load_raw(self, filepath: str):
         print(f'\nLoading tick data: {filepath}')
 
-        # Fast vectorized loading: split on semicolons, parse in bulk
-        # Format: "YYYYMMDD HHMMSS nanos;price;low;high;volume"
         df = pd.read_csv(
             filepath,
             sep=';',
             header=None,
             names=['ts_raw', 'price', 'low', 'high', 'volume'],
-            dtype={'ts_raw': str, 'price': np.float64, 'low': np.float64,
-                   'high': np.float64, 'volume': np.int64},
-            engine='c',
+            engine='pyarrow',
+            dtype_backend='pyarrow'
         )
 
-        # Parse timestamps: "YYYYMMDD HHMMSS nanoseconds"
-        ts_parts = df['ts_raw'].str.split(' ', n=2, expand=True)
-        date_str = ts_parts[0]   # YYYYMMDD
-        time_str = ts_parts[1]   # HHMMSS
-        nanos_str = ts_parts[2]  # sub-second nanoseconds
-
-        # Build datetime string: "YYYY-MM-DD HH:MM:SS"
-        dt_str = (
-            date_str.str[:4] + '-' + date_str.str[4:6] + '-' + date_str.str[6:8] +
-            ' ' +
-            time_str.str[:2] + ':' + time_str.str[2:4] + ':' + time_str.str[4:6]
-        )
-
-        timestamps = pd.to_datetime(dt_str, format='%Y-%m-%d %H:%M:%S').values.astype('datetime64[ns]')
-        nanos = pd.to_numeric(nanos_str, errors='coerce').fillna(0).astype(np.int64).values
-        timestamps = timestamps + nanos.astype('timedelta64[ns]')
-
-        self._timestamps = timestamps
-        self._prices = df['price'].values
-        self._lows = df['low'].values
-        self._highs = df['high'].values
-        self._volumes = df['volume'].values
+        # Do NOT parse datetimes here. Just store the raw strings.
+        self._ts_raw = df['ts_raw'].to_numpy()  # Store as an array of strings
+        self._prices = df['price'].to_numpy()
+        self._lows = df['low'].to_numpy()
+        self._highs = df['high'].to_numpy()
+        self._volumes = df['volume'].to_numpy()
 
         print(f'Loaded {len(self._prices):,} ticks')
-        print(f'Start: {self._timestamps[0]}')
-        print(f'End:   {self._timestamps[-1]}')
-        print(f'Price range: {self._prices.min():.2f} - {self._prices.max():.2f}\n')
+        print(
+            f'Price range: {self._prices.min():.2f} - {self._prices.max():.2f}\n')
 
     def aggregate(self, method: str = 'tick', size: int = 250) -> 'TickData':
         if method not in self.AGGREGATION_METHODS:
-            raise ValueError(f"Unknown method '{method}'. Use: {self.AGGREGATION_METHODS}")
+            raise ValueError(
+                f"Unknown method '{method}'. Use: {self.AGGREGATION_METHODS}")
 
         self._bar_method = method
         self._bar_size = size
@@ -92,28 +73,51 @@ class TickData:
         elif method == 'time':
             self._aggregate_time_bars(size)
 
-        print(f'Aggregated {len(self._prices):,} ticks into {len(self._ohlc):,} bars ({size} {method})')
+        print(
+            f'Aggregated {len(self._prices):,} ticks into {len(self._ohlc):,} bars ({size} {method})')
         return self
 
     def _aggregate_tick_bars(self, n_ticks: int):
         n_total = len(self._prices)
         n_bars = n_total // n_ticks
 
-        # trim to exact multiple
         trim = n_bars * n_ticks
         prices = self._prices[:trim].reshape(n_bars, n_ticks)
-        lows = self._lows[:trim].reshape(n_bars, n_ticks)
         highs = self._highs[:trim].reshape(n_bars, n_ticks)
-        timestamps = self._timestamps[:trim].reshape(n_bars, n_ticks)
+        lows = self._lows[:trim].reshape(n_bars, n_ticks)
+
+        # Reshape the raw string timestamps
+        ts_raw = self._ts_raw[:trim].reshape(n_bars, n_ticks)
 
         opens = prices[:, 0]
         closes = prices[:, -1]
         bar_highs = highs.max(axis=1)
         bar_lows = lows.min(axis=1)
-        bar_times = timestamps[:, -1]  # close time of bar
+
+        # Get ONLY the closing string for each bar (reduces parsing by 250x)
+        bar_close_strings = ts_raw[:, -1]
 
         self._ohlc = np.column_stack([opens, bar_highs, bar_lows, closes])
-        self._indices = pd.DatetimeIndex(bar_times).tz_localize(self._timezone)
+
+        # NOW parse the datetimes using standard Pandas string methods
+        # This will take milliseconds because it's only 92,000 strings instead of 23,000,000
+        ts_series = pd.Series(bar_close_strings)
+        date_str = ts_series.str.slice(0, 8)
+        time_str = ts_series.str.slice(9, 15)
+        nanos_str = ts_series.str.slice(16)
+
+        dt_str = date_str.str.slice(0, 4) + '-' + date_str.str.slice(4, 6) + '-' + date_str.str.slice(6, 8) + ' ' + \
+            time_str.str.slice(0, 2) + ':' + time_str.str.slice(2,
+                                                                4) + ':' + time_str.str.slice(4, 6)
+
+        base_timestamps = pd.to_datetime(
+            dt_str, format='%Y-%m-%d %H:%M:%S').values.astype('datetime64[ns]')
+        nanos = pd.to_numeric(nanos_str, errors='coerce').fillna(
+            0).astype(np.int64).values
+
+        final_timestamps = base_timestamps + nanos.astype('timedelta64[ns]')
+        self._indices = pd.DatetimeIndex(
+            final_timestamps).tz_localize(self._timezone)
 
     def _aggregate_volume_bars(self, target_volume: int):
         cum_vol = np.cumsum(self._volumes)
@@ -122,7 +126,8 @@ class TickData:
         # find last tick index of each bar
         bar_boundaries = np.where(np.diff(bar_ids))[0]
         if len(bar_boundaries) == 0:
-            raise ValueError(f"Not enough volume for even 1 bar at size={target_volume}")
+            raise ValueError(
+                f"Not enough volume for even 1 bar at size={target_volume}")
 
         starts = np.concatenate([[0], bar_boundaries + 1])
         ends = np.concatenate([bar_boundaries, [len(self._prices) - 1]])
@@ -150,7 +155,8 @@ class TickData:
 
         bar_boundaries = np.where(np.diff(bar_ids))[0]
         if len(bar_boundaries) == 0:
-            raise ValueError(f"Not enough dollar volume for even 1 bar at size={target_dollars}")
+            raise ValueError(
+                f"Not enough dollar volume for even 1 bar at size={target_dollars}")
 
         starts = np.concatenate([[0], bar_boundaries + 1])
         ends = np.concatenate([bar_boundaries, [len(self._prices) - 1]])
@@ -226,7 +232,8 @@ class TickData:
                 return f'{secs // 3600}H'
         # for tick/volume/dollar bars, estimate average bar duration
         if self._indices is not None and len(self._indices) > 1:
-            avg_delta = (self._indices[-1] - self._indices[0]) / len(self._indices)
+            avg_delta = (self._indices[-1] -
+                         self._indices[0]) / len(self._indices)
             minutes = avg_delta.total_seconds() / 60
             if minutes < 1:
                 return '1min'

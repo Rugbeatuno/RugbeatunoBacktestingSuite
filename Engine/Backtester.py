@@ -223,10 +223,8 @@ class Backtester:
             self.indicies[start_index_location]
 
     def calculate_winlose_metrics(self):
-        trade_pnl_series: pd.Series = pd.Series(self.trade_pnl)
-        trade_groups: np.ndarray = self.trade_indicies.cumsum()
-        trade_returns: pd.Series = trade_pnl_series.groupby(trade_groups).sum()
-        trade_returns: np.ndarray = trade_returns.values
+        boundaries = np.where(self.trade_indicies > 0)[0]
+        trade_returns = np.add.reduceat(self.trade_pnl, boundaries)
 
         winning_trades = trade_returns[trade_returns > 0]
         losing_trades = trade_returns[trade_returns < 0]
@@ -388,6 +386,59 @@ class Backtester:
         plt.ylabel('Total PNL / Trade Returns per Minute')
         plt.title('Total Trade Returns (PNL) by Entry Time')
         plt.show()
+
+    def bootstrap_mc_resampling(self, iterations: int = 10000, max_paths: int = 100, max_points: int = 100) -> dict:
+        boundaries = np.where(self.trade_indicies > 0)[0]
+        trade_returns = np.add.reduceat(self.trade_pnl, boundaries)
+        n_trades = len(trade_returns)
+        rng = np.random.default_rng()
+
+        # --- Equity paths: only generate max_paths full cumsums ---
+        n_paths = min(max_paths, iterations)
+        path_samples = rng.choice(trade_returns, size=(
+            n_paths, n_trades), replace=True)
+        path_equity = np.cumsum(path_samples, axis=1)
+
+        # Downsample paths for plotting
+        step = max(1, n_trades // max_points)
+        path_x = np.arange(0, n_trades, step)
+        paths_downsampled = path_equity[:, path_x]
+
+        # Original equity path
+        original_equity = trade_returns.cumsum()
+        original_downsampled = original_equity[path_x]
+
+        # --- Final PnLs: for histogram we only need the sum ---
+        final_pnls = np.empty(iterations)
+        final_pnls[:n_paths] = path_equity[:, -1]
+
+        # Remaining iterations: compute sums in chunks (no cumsum needed)
+        remaining = iterations - n_paths
+        chunk_size = 2000
+        for i in range(0, remaining, chunk_size):
+            batch = min(chunk_size, remaining - i)
+            samples = rng.choice(trade_returns, size=(
+                batch, n_trades), replace=True)
+            final_pnls[n_paths + i:n_paths + i + batch] = samples.sum(axis=1)
+
+        # --- Stats from empirical distribution ---
+        ci_95 = (float(np.percentile(final_pnls, 2.5)),
+                 float(np.percentile(final_pnls, 97.5)))
+        ci_997 = (float(np.percentile(final_pnls, 0.15)),
+                  float(np.percentile(final_pnls, 99.85)))
+
+        return {
+            'paths': paths_downsampled,
+            'path_x': path_x,
+            'original_path': original_downsampled,
+            'final_pnls': final_pnls,
+            'original_final_pnl': float(original_equity[-1]),
+            'mean_pnl': float(final_pnls.mean()),
+            'ci_95': ci_95,
+            'ci_997': ci_997,
+            'iterations': iterations,
+            'n_trades': n_trades,
+        }
 
     def monte_carlo_pnl_resampling_test(self, iterations: int = 1000, pct_of_trades: float = 1):
         trade_groups = self.trade_indicies.cumsum()
