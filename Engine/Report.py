@@ -12,7 +12,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
 
     # --- Compute stats ---
     trade_groups = bt.trade_indicies.cumsum()
-    trade_returns = pd.Series(bt.trade_pnl).groupby(trade_groups).sum().values
+    trade_returns = pd.Series(bt.candle_pnl).groupby(trade_groups).sum().values
 
     # Win rate CI (Wilson score)
     _, wr_lb_95, wr_ub_95 = confidence_interval(
@@ -33,12 +33,20 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
     shares = bt.initial_equity / bt.close_prices[0]
     buyhold_equity = shares * bt.close_prices
 
-    # Downsample for plotting
-    step = max(1, len(bt.equity_curve) // 2000)
-    plot_indices = bt.indicies[::step]
-    plot_equity = bt.equity_curve[::step]
-    plot_buyhold = buyhold_equity[::step]
-    plot_drawdown = bt.drawdown_curve[::step]
+    # Build per-trade equity/drawdown by summing at trade boundaries
+    boundaries = np.flatnonzero(bt.trade_indicies)
+    trade_returns_cum = np.add.reduceat(bt.candle_pnl, boundaries).cumsum()
+    trade_equity = bt.initial_equity + trade_returns_cum
+    trade_drawdown = trade_equity - np.maximum.accumulate(trade_equity)
+    trade_x = np.arange(1, len(trade_equity) + 1)
+
+    # Downsample for plotting (by trade number)
+    step = max(1, len(trade_equity) // 2000)
+    plot_x = trade_x[::step]
+    plot_equity = trade_equity[::step]
+    plot_buyhold = np.linspace(
+        buyhold_equity[0], buyhold_equity[-1], len(plot_x))
+    plot_drawdown = trade_drawdown[::step]
 
     # Date range string
     start_str = bt.start_date.strftime('%Y-%m-%d')
@@ -50,20 +58,21 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
     # 1. Main equity chart
     fig_equity = go.Figure()
     fig_equity.add_trace(go.Scatter(
-        x=plot_indices, y=plot_equity,
+        x=plot_x, y=plot_equity,
         name='Strategy', line=dict(color='#2196F3', width=1.5),
-        hovertemplate='%{x}<br>Equity: $%{y:,.2f}<extra></extra>'
+        hovertemplate='Trade #%{x}<br>Equity: $%{y:,.2f}<extra></extra>'
     ))
     fig_equity.add_trace(go.Scatter(
-        x=plot_indices, y=plot_buyhold,
+        x=plot_x, y=plot_buyhold,
         name='Buy & Hold', line=dict(color='#9E9E9E', width=1, dash='dot'),
-        hovertemplate='%{x}<br>B&H: $%{y:,.2f}<extra></extra>'
+        hovertemplate='Trade #%{x}<br>B&H: $%{y:,.2f}<extra></extra>'
     ))
     fig_equity.update_layout(
-        margin=dict(l=50, r=20, t=40, b=40),
-        legend=dict(x=0.01, y=0.99, bgcolor='rgba(0,0,0,0)'),
+        margin=dict(l=50, r=20, t=30, b=30),
+        legend=dict(x=0.5, y=1.15, xanchor='center', yanchor='top',
+                    orientation='h', bgcolor='rgba(0,0,0,0)'),
         hovermode='x unified',
-        xaxis=dict(showgrid=True, gridcolor='#2a2a2a'),
+        xaxis=dict(title='Trade #', showgrid=True, gridcolor='#2a2a2a'),
         yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
         paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
         font=dict(color='#e0e0e0'),
@@ -80,15 +89,15 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
     # 2. Drawdown chart
     fig_drawdown = go.Figure()
     fig_drawdown.add_trace(go.Scatter(
-        x=plot_indices, y=plot_drawdown,
+        x=plot_x, y=plot_drawdown,
         fill='tozeroy', fillcolor='rgba(244,67,54,0.3)',
         line=dict(color='#f44336', width=1),
-        hovertemplate='%{x}<br>Drawdown: $%{y:,.2f}<extra></extra>'
+        hovertemplate='Trade #%{x}<br>Drawdown: $%{y:,.2f}<extra></extra>'
     ))
     fig_drawdown.update_layout(
-        margin=dict(l=50, r=20, t=30, b=40),
+        margin=dict(l=50, r=20, t=30, b=50),
         hovermode='x unified',
-        xaxis=dict(showgrid=True, gridcolor='#2a2a2a'),
+        xaxis=dict(title='Trade #', showgrid=True, gridcolor='#2a2a2a'),
         yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
         paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
         font=dict(color='#e0e0e0'),
@@ -112,13 +121,14 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         name='Original', hovertemplate='Trade %{x}<br>PnL: $%{y:,.2f}<extra></extra>',
     ))
     fig_mc_paths.update_layout(
-        margin=dict(l=50, r=20, t=30, b=40),
+        margin=dict(l=50, r=20, t=30, b=20),
         hovermode='x unified',
         xaxis=dict(title='Trade #', showgrid=True, gridcolor='#2a2a2a'),
         yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
         paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
         font=dict(color='#e0e0e0'),
-        legend=dict(x=0.01, y=0.99, bgcolor='rgba(0,0,0,0)'),
+        legend=dict(x=0.5, y=1.12, xanchor='center', yanchor='top',
+                    orientation='h', bgcolor='rgba(0,0,0,0)'),
     )
 
     # Right panel: histogram of final PnLs
@@ -133,8 +143,8 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
     fig_mc_hist.add_vline(x=mc_data['original_final_pnl'], line=dict(color='#2196F3', width=2.5),
                           annotation_text='Original', annotation_position='top')
     # Mean line
-    fig_mc_hist.add_vline(x=mc_data['mean_pnl'], line=dict(color='#FF9800', width=2, dash='dash'),
-                          annotation_text='Mean', annotation_position='top')
+    # fig_mc_hist.add_vline(x=mc_data['mean_pnl'], line=dict(color='#FF9800', width=2, dash='dash'),
+    #                       annotation_text='Mean', annotation_position='top')
     # 95% CI
     fig_mc_hist.add_vrect(x0=mc_data['ci_95'][0], x1=mc_data['ci_95'][1],
                           fillcolor='rgba(76, 175, 80, 0.12)', line_width=0,
@@ -150,10 +160,10 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         color='#f44336', width=1, dash='dashdot'))
 
     fig_mc_hist.update_layout(
-        margin=dict(l=50, r=20, t=30, b=60),
+        margin=dict(l=50, r=20, t=30, b=95),
         xaxis=dict(title='Final PnL ($)', showgrid=True,
                    gridcolor='#2a2a2a', tickprefix='$', tickformat=',.0f',
-                   showticklabels=True, tickangle=-30, tickfont=dict(size=11)),
+                   showticklabels=True, tickangle=0, tickfont=dict(size=11)),
         yaxis=dict(title='Frequency', showgrid=True, gridcolor='#2a2a2a'),
         paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
         font=dict(color='#e0e0e0'),
@@ -199,6 +209,106 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
     </div>
     '''
 
+    # 4. Kelly Criterion — Equity projection chart
+    b_kelly = bt.kelly_payoff_ratio if bt.kelly_payoff_ratio > 0 else 1.0
+    kelly_fracs = [1, 1/2, 1/4, 1/8, 1/16]
+    kelly_labels = ['Full Kelly', '1/2 Kelly',
+                    '1/4 Kelly', '1/8 Kelly', '1/16 Kelly']
+    kelly_colors = ['#FF9800', '#4CAF50', '#2196F3', '#9C27B0', '#607D8B']
+
+    # Per-trade returns as fraction of equity (normalized to 1 contract flat bet)
+    boundaries_k = np.flatnonzero(bt.trade_indicies)
+    per_trade_pnl = np.add.reduceat(bt.candle_pnl, boundaries_k)
+    n_kelly_trades = len(per_trade_pnl)
+
+    # Current strategy: fixed 1 contract (flat sizing)
+    current_equity = bt.initial_equity + per_trade_pnl.cumsum()
+
+    # Simulate geometric Kelly sizing for each fraction
+    kelly_equity_paths = {}
+    kelly_final = {}
+    for frac, label in zip(kelly_fracs, kelly_labels):
+        f_val = bt.kelly_fraction * frac
+        if f_val <= 0 or f_val >= 1:
+            kelly_equity_paths[label] = current_equity.copy()
+            kelly_final[label] = current_equity[-1]
+            continue
+        eq = np.empty(n_kelly_trades)
+        bal = bt.initial_equity
+        for i in range(n_kelly_trades):
+            # Risk f_val of current bankroll per trade
+            # pnl scaled: original pnl per trade assumes 1 contract
+            # Kelly bet: risk fraction * bankroll, pnl proportional
+            trade_return_pct = per_trade_pnl[i] / bt.initial_equity
+            bal = bal * (1 + f_val * trade_return_pct * n_kelly_trades /
+                         bt.total_trades * bt.total_trades / n_kelly_trades)
+            eq[i] = bal
+        # Simpler: geometric compounding with Kelly fraction
+        # Each trade's return as pct of initial -> scale by fraction of current bankroll
+        eq2 = np.empty(n_kelly_trades)
+        bal2 = bt.initial_equity
+        for i in range(n_kelly_trades):
+            ret_pct = per_trade_pnl[i] / bt.initial_equity
+            bal2 = bal2 * (1 + f_val * ret_pct)
+            eq2[i] = bal2
+        kelly_equity_paths[label] = eq2
+        kelly_final[label] = eq2[-1]
+
+    # Downsample for plotting
+    step_k = max(1, n_kelly_trades // 2000)
+    kelly_x = np.arange(1, n_kelly_trades + 1)[::step_k]
+
+    fig_kelly = go.Figure()
+    # Current flat sizing
+    fig_kelly.add_trace(go.Scatter(
+        x=kelly_x, y=current_equity[::step_k],
+        name='Current (1 contract)', line=dict(color='#e0e0e0', width=2),
+        hovertemplate='Trade #%{x}<br>Equity: $%{y:,.0f}<extra></extra>',
+    ))
+    # Kelly paths
+    for label, color in zip(kelly_labels, kelly_colors):
+        fig_kelly.add_trace(go.Scatter(
+            x=kelly_x, y=kelly_equity_paths[label][::step_k],
+            name=label, line=dict(color=color, width=1.5),
+            hovertemplate='Trade #%{x}<br>Equity: $%{y:,.0f}<extra></extra>',
+        ))
+
+    fig_kelly.update_layout(
+        margin=dict(l=50, r=20, t=30, b=30),
+        legend=dict(x=0.5, y=1.15, xanchor='center', yanchor='top',
+                    orientation='h', bgcolor='rgba(0,0,0,0)'),
+        hovermode='x unified',
+        xaxis=dict(title='Trade #', showgrid=True, gridcolor='#2a2a2a'),
+        yaxis=dict(showgrid=True, gridcolor='#2a2a2a',
+                   tickprefix='$', type='log'),
+        paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
+        font=dict(color='#e0e0e0'),
+    )
+
+    # Kelly table panel
+    kelly_table_rows = []
+    for frac, label in zip(kelly_fracs, kelly_labels):
+        f_val = bt.kelly_fraction * frac
+        if f_val > 0 and b_kelly > 0 and f_val < 1:
+            g_val = bt.win_rate * np.log(1 + f_val * b_kelly) + \
+                (1 - bt.win_rate) * np.log(1 - f_val)
+        else:
+            g_val = 0.0
+        final_eq = kelly_final.get(label, bt.initial_equity)
+        kelly_table_rows.append((label, f_val, g_val, final_eq))
+
+    kelly_table_html = '<div class="kelly-table-section">'
+    kelly_table_html += '<h3>Kelly Criterion</h3>'
+    kelly_table_html += f'<div class="kelly-big">{bt.kelly_fraction:.2%}</div>'
+    kelly_table_html += f'<div class="kelly-sub">Payoff Ratio: {b_kelly:.2f} | Win Rate: {bt.win_rate:.2%}</div>'
+    kelly_table_html += '<table class="kelly-table"><thead><tr><th>Fraction</th><th>Bet Size</th><th>Final Equity</th><th>Growth</th></tr></thead><tbody>'
+    # Current row
+    kelly_table_html += f'<tr><td>Current (flat)</td><td>—</td><td>${current_equity[-1]:,.0f}</td><td>—</td></tr>'
+    for label, f_val, g_val, final_eq in kelly_table_rows:
+        highlight = ' class="kelly-highlight"' if label == 'Full Kelly' else ''
+        kelly_table_html += f'<tr{highlight}><td>{label}</td><td>{f_val:.2%}</td><td>${final_eq:,.0f}</td><td>{g_val:.5f}</td></tr>'
+    kelly_table_html += '</tbody></table></div>'
+
     # --- Convert figures to HTML divs ---
     equity_html = fig_equity.to_html(
         full_html=False, include_plotlyjs=False, div_id='equity-chart',
@@ -211,6 +321,9 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         config={'responsive': True})
     mc_hist_html = fig_mc_hist.to_html(
         full_html=False, include_plotlyjs=False, div_id='mc-hist-chart',
+        config={'responsive': True})
+    kelly_chart_html = fig_kelly.to_html(
+        full_html=False, include_plotlyjs=False, div_id='kelly-chart',
         config={'responsive': True})
 
     # Drawdown duration formatting
@@ -357,21 +470,37 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
                 <span class="stat-label">Profit Factor</span>
                 <span class="stat-value">{bt.profit_factor:.2f}</span>
             </div>
+            <div class="stat-row">
+                <span class="stat-label">Alpha (ann.)</span>
+                <span class="stat-value">{_fmt_pct(bt.alpha)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Beta</span>
+                <span class="stat-value">{bt.beta:.2f}</span>
+            </div>
         </div>
 
         <div class="stat-section">
             <h3>Costs</h3>
             <div class="stat-row">
-                <span class="stat-label">Slippage</span>
+                <span class="stat-label">Slippage / Trade</span>
                 <span class="stat-value">{bt.slippage_ticks} ticks</span>
             </div>
             <div class="stat-row">
-                <span class="stat-label">Commission</span>
+                <span class="stat-label">Commission / Trade</span>
                 <span class="stat-value">{_fmt_dollar(bt.commission)}</span>
             </div>
-            <div class="stat-row">
+            <div class="stat-row highlight">
                 <span class="stat-label">Total Costs</span>
                 <span class="stat-value negative">{_fmt_dollar(float(bt.transaction_costs.sum()))}</span>
+            </div>
+            <div class="stat-row ci-row">
+                <span class="stat-label">Slippage</span>
+                <span class="stat-value ci">{_fmt_dollar(float(bt.slippage_costs.sum()))}</span>
+            </div>
+            <div class="stat-row ci-row">
+                <span class="stat-label">Commission</span>
+                <span class="stat-value ci">{_fmt_dollar(float(bt.commission_costs.sum()))}</span>
             </div>
         </div>
     </div>
@@ -404,7 +533,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             grid-template-columns: 3fr 1fr;
             gap: 12px;
             margin-bottom: 12px;
-            height: 420px;
+            height: 460px;
         }}
 
         .panel {{
@@ -589,7 +718,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         }}
 
         .below-fold .panel {{
-            height: 300px;
+            height: 330px;
         }}
 
         /* Monte Carlo section */
@@ -704,6 +833,85 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             color: #999;
         }}
 
+        /* Kelly Criterion section */
+        .kelly-row {{
+            margin-top: 12px;
+            display: grid;
+            grid-template-columns: 2fr 2fr 1fr;
+            gap: 12px;
+        }}
+
+        .kelly-row .panel {{
+            height: 520px;
+        }}
+
+        .kelly-table-section {{
+            background: #111;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }}
+
+        .kelly-table-section h3 {{
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 12px;
+            text-align: center;
+        }}
+
+        .kelly-big {{
+            font-size: 32px;
+            font-weight: 700;
+            text-align: center;
+            color: #2196F3;
+            margin: 4px 0 8px;
+        }}
+
+        .kelly-sub {{
+            font-size: 12px;
+            color: #999;
+            text-align: center;
+            margin-bottom: 16px;
+        }}
+
+        .kelly-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }}
+
+        .kelly-table th {{
+            text-align: left;
+            color: #888;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            padding: 6px 8px;
+            border-bottom: 1px solid #2a2a2a;
+        }}
+
+        .kelly-table td {{
+            padding: 6px 8px;
+            color: #e0e0e0;
+            font-variant-numeric: tabular-nums;
+        }}
+
+        .kelly-table tr.kelly-highlight {{
+            background: #222;
+            border-radius: 4px;
+        }}
+
+        .kelly-table tr.kelly-highlight td {{
+            color: #2196F3;
+            font-weight: 600;
+        }}
+
         @media (max-width: 1000px) {{
             .top-row {{
                 grid-template-columns: 1fr;
@@ -754,6 +962,17 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             </div>
             <div class="panel" style="padding: 0;">
                 {mc_ci_html}
+            </div>
+        </div>
+
+        <!-- Kelly Criterion Section -->
+        <div class="kelly-row">
+            <div class="panel chart-panel">
+                <div class="panel-title">Kelly Criterion — Equity Projection</div>
+                {kelly_chart_html}
+            </div>
+            <div class="panel" style="padding: 0;">
+                {kelly_table_html}
             </div>
         </div>
     </div>

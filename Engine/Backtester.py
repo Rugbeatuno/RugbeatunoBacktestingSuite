@@ -63,12 +63,14 @@ class Backtester:
 
         # Signal metrics
         self.signal: np.ndarray = signal
-        self.trade_indicies: np.ndarray = np.insert(
-            np.abs(np.diff(self.signal)) / 2, 0, 0.0)
+        prev_signal = np.roll(self.signal, 1)
+        prev_signal[0] = 0.0
+        self.trade_indicies: np.ndarray = ((self.signal != 0) & (
+            self.signal != prev_signal)).astype(float)
 
         # Return metrics
-        self.trade_pnl: np.ndarray = None  # PnL of each candle
-        self.cum_trade_pnl: np.ndarray = None  # cumulative PnL
+        self.candle_pnl: np.ndarray = None  # PnL of each candle
+        self.cum_candle_pnl: np.ndarray = None  # cumulative PnL
         self.equity_curve: np.ndarray = None  # dollar equity curve
         self.drawdown_curve: np.ndarray = None  # dollar amounts
         self.transaction_costs: np.ndarray = None  # transaction costs per bar
@@ -110,8 +112,13 @@ class Backtester:
         self.sortino_ratio: float = None
         self.profit_factor: float = None
 
-        # self.alpha: float = None
-        # self.beta: float = None
+        self.alpha: float = None
+        self.beta: float = None
+
+        # Kelly criterion
+        self.kelly_fraction: float = None
+        self.kelly_payoff_ratio: float = None
+        self.kelly_growth_rate: float = None
         self.backtest_ran = False
 
     def __str__(self):
@@ -163,6 +170,8 @@ class Backtester:
         self.calculate_drawdown_metrics()
         self.calculate_winlose_metrics()
         self.calculate_performance_metrics()
+        self.calculate_alpha_beta()
+        self.calculate_kelly_criterion()
 
     def quick_backtest(self) -> None:
         if len(self.signal) != len(self.close_prices):
@@ -179,16 +188,18 @@ class Backtester:
         price_diff = np.where(entered_this_bar, open_to_close, close_to_close)
 
         raw_pnl: np.ndarray = position * price_diff * self.contract_multiplier
-        commision_cost: np.ndarray = self.trade_indicies * self.commission
-        slippage_cost: np.ndarray = self.trade_indicies * self.slippage_ticks * \
+
+        self.commission_costs: np.ndarray = self.trade_indicies * self.commission
+        self.slippage_costs: np.ndarray = self.trade_indicies * self.slippage_ticks * \
             self.tick_value
-        self.transaction_costs: np.ndarray = commision_cost + slippage_cost
-        self.trade_pnl: np.ndarray = raw_pnl - self.transaction_costs
-        self.cum_trade_pnl: np.ndarray = self.trade_pnl.cumsum()
-        self.equity_curve: np.ndarray = self.initial_equity + self.cum_trade_pnl
+        self.transaction_costs: np.ndarray = self.commission_costs + self.slippage_costs
+
+        self.candle_pnl: np.ndarray = raw_pnl - self.transaction_costs
+        self.cum_candle_pnl: np.ndarray = self.candle_pnl.cumsum()
+        self.equity_curve: np.ndarray = self.initial_equity + self.cum_candle_pnl
 
         self.final_equity = self.equity_curve[-1]
-        self.total_pnl = self.cum_trade_pnl[-1]
+        self.total_pnl = self.cum_candle_pnl[-1]
         self.total_pct_return = self.total_pnl / self.initial_equity
 
         self.backtest_ran = True
@@ -223,8 +234,8 @@ class Backtester:
             self.indicies[start_index_location]
 
     def calculate_winlose_metrics(self):
-        boundaries = np.where(self.trade_indicies > 0)[0]
-        trade_returns = np.add.reduceat(self.trade_pnl, boundaries)
+        boundaries = np.flatnonzero(self.trade_indicies)
+        trade_returns = np.add.reduceat(self.candle_pnl, boundaries)
 
         winning_trades = trade_returns[trade_returns > 0]
         losing_trades = trade_returns[trade_returns < 0]
@@ -283,6 +294,8 @@ class Backtester:
 
     def calculate_performance_metrics(self):
         bars_annually = bars_per_year(self.timeframe)
+        boundaries = np.flatnonzero(self.trade_indicies)
+        trade_returns = np.add.reduceat(self.candle_pnl, boundaries)
 
         # CAGR
         years = self.duration.days / 365.25
@@ -311,8 +324,8 @@ class Backtester:
             self.sortino_ratio = 0.0
 
         # profit factor
-        total_gains = self.trade_pnl[self.trade_pnl > 0].sum()
-        total_losses = -self.trade_pnl[self.trade_pnl < 0].sum()
+        total_gains = trade_returns[trade_returns > 0].sum()
+        total_losses = -trade_returns[trade_returns < 0].sum()
         if total_losses > 0:
             self.profit_factor = total_gains / total_losses
         else:
@@ -321,6 +334,53 @@ class Backtester:
         # self.annualized_return = (1 + mean_ret) ** bars_annually - 1
         # self.annualized_vol = std_ret * np.sqrt(bars_annually)
         # print(self.annualized_return, self.annualized_vol)
+
+    def calculate_alpha_beta(self):
+        bars_annually = bars_per_year(self.timeframe)
+
+        equity = self.equity_curve
+        strategy_returns = np.diff(equity) / equity[:-1]
+
+        # Benchmark: buy & hold bar returns
+        benchmark_returns = np.diff(self.close_prices) / self.close_prices[:-1]
+
+        # Beta = Cov(strategy, benchmark) / Var(benchmark)
+        cov = np.cov(strategy_returns, benchmark_returns)[0, 1]
+        var_bench = np.var(benchmark_returns, ddof=1)
+        self.beta = cov / var_bench if var_bench > 0 else 0.0
+
+        # Annualized returns
+        strat_annual = (1 + strategy_returns.mean()) ** bars_annually - 1
+        bench_annual = (1 + benchmark_returns.mean()) ** bars_annually - 1
+
+        # Alpha = strategy annual return - beta * benchmark annual return
+        self.alpha = strat_annual - self.beta * bench_annual
+
+    def calculate_kelly_criterion(self):
+        if self.win_rate is None or np.isnan(self.win_rate):
+            self.kelly_fraction = 0.0
+            self.kelly_payoff_ratio = 0.0
+            self.kelly_growth_rate = 0.0
+            return
+
+        p = self.win_rate
+        b = self.ratio_avg_win_loss if not np.isnan(
+            self.ratio_avg_win_loss) else 0.0
+        q = 1 - p
+
+        # Kelly: f* = (bp - q) / b
+        self.kelly_payoff_ratio = b
+        if b > 0:
+            self.kelly_fraction = (b * p - q) / b
+        else:
+            self.kelly_fraction = 0.0
+
+        # Expected geometric growth rate at full Kelly
+        if self.kelly_fraction > 0 and b > 0:
+            self.kelly_growth_rate = p * np.log(1 + self.kelly_fraction * b) + \
+                q * np.log(1 - self.kelly_fraction)
+        else:
+            self.kelly_growth_rate = 0.0
 
     def generate_equity_curve(self) -> EquityCurve:
         return EquityCurve(self.equity_curve, self.drawdown_curve, self.trade_indicies, self.indicies)
@@ -334,12 +394,12 @@ class Backtester:
         return EquityCurve(equity_curve, drawdown_curve, self.trade_indicies, self.indicies)
 
     def generate_skew_curve(self) -> SkewCurve:
-        return SkewCurve(self.trade_pnl, self.trade_indicies, self.initial_equity)
+        return SkewCurve(self.candle_pnl, self.trade_indicies, self.initial_equity)
 
     def generate_trade_time_distribution(self) -> None:
         trade_groups = self.trade_indicies.cumsum()
         trade_returns: pd.Series = pd.Series(
-            self.trade_pnl).groupby(trade_groups).sum()
+            self.candle_pnl).groupby(trade_groups).sum()
         trade_entry_times: pd.DatetimeIndex = self.indicies[self.trade_indicies.astype(
             bool)]
 
@@ -387,9 +447,9 @@ class Backtester:
         plt.title('Total Trade Returns (PNL) by Entry Time')
         plt.show()
 
-    def bootstrap_mc_resampling(self, iterations: int = 10000, max_paths: int = 100, max_points: int = 100) -> dict:
-        boundaries = np.where(self.trade_indicies > 0)[0]
-        trade_returns = np.add.reduceat(self.trade_pnl, boundaries)
+    def bootstrap_mc_resampling(self, iterations: int = 10000, max_paths: int = 300, max_points: int = 100) -> dict:
+        boundaries = np.flatnonzero(self.trade_indicies)
+        trade_returns = np.add.reduceat(self.candle_pnl, boundaries)
         n_trades = len(trade_returns)
         rng = np.random.default_rng()
 
@@ -442,7 +502,7 @@ class Backtester:
 
     def monte_carlo_pnl_resampling_test(self, iterations: int = 1000, pct_of_trades: float = 1):
         trade_groups = self.trade_indicies.cumsum()
-        trade_returns: np.ndarray = pd.Series(self.trade_pnl).groupby(
+        trade_returns: np.ndarray = pd.Series(self.candle_pnl).groupby(
             trade_groups).sum().values
 
         n_trades = len(trade_returns)
