@@ -466,9 +466,13 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
                 <span class="stat-label">Sortino Ratio</span>
                 <span class="stat-value">{bt.sortino_ratio:.2f}</span>
             </div>
-            <div class="stat-row">
+            <div class="stat-row highlight">
                 <span class="stat-label">Profit Factor</span>
                 <span class="stat-value">{bt.profit_factor:.2f}</span>
+            </div>
+            <div class="stat-row ci-row">
+                <span class="stat-label">Granular (bar-level)</span>
+                <span class="stat-value ci">{bt.profit_factor_granular:.2f}</span>
             </div>
             <div class="stat-row">
                 <span class="stat-label">Alpha (ann.)</span>
@@ -912,6 +916,189 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             font-weight: 600;
         }}
 
+        /* Streak probability section */
+        .streak-section {{
+            margin-top: 12px;
+        }}
+
+        .streak-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }}
+
+        .streak-header-left {{
+            display: flex;
+            align-items: baseline;
+            gap: 12px;
+        }}
+
+        .streak-header-left h2 {{
+            font-size: 16px;
+            font-weight: 600;
+            color: #e0e0e0;
+            margin: 0;
+        }}
+
+        .streak-header-left .streak-winrate {{
+            font-size: 13px;
+            color: #888;
+        }}
+
+        .streak-slider-wrap {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: #111;
+            border: 1px solid #2a2a2a;
+            border-radius: 24px;
+            padding: 6px 18px;
+        }}
+
+        .streak-slider-wrap label {{
+            font-size: 12px;
+            color: #999;
+            white-space: nowrap;
+        }}
+
+        #streak-n-display {{
+            font-weight: 700;
+            color: #2196F3;
+            font-size: 14px;
+            min-width: 52px;
+            display: inline-block;
+            text-align: right;
+        }}
+
+        #streak-slider {{
+            width: 220px;
+            height: 4px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: linear-gradient(to right, #2a2a2a, #2196F3);
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+        }}
+
+        #streak-slider::-webkit-slider-thumb {{
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #2196F3;
+            box-shadow: 0 0 8px rgba(33, 150, 243, 0.5);
+            cursor: pointer;
+        }}
+
+        #streak-slider::-moz-range-thumb {{
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #2196F3;
+            box-shadow: 0 0 8px rgba(33, 150, 243, 0.5);
+            border: none;
+            cursor: pointer;
+        }}
+
+        .streak-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }}
+
+        .streak-col {{
+            background: #111;
+            border: 1px solid #2a2a2a;
+            border-radius: 10px;
+            padding: 16px;
+        }}
+
+        .streak-col-title {{
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #2a2a2a;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+
+        .streak-col-title.win {{ color: #4CAF50; }}
+        .streak-col-title.loss {{ color: #f44336; }}
+
+        .streak-col-title::before {{
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+        }}
+
+        .streak-col-title.win::before {{ background: #4CAF50; box-shadow: 0 0 6px #4CAF50; }}
+        .streak-col-title.loss::before {{ background: #f44336; box-shadow: 0 0 6px #f44336; }}
+
+        .streak-heatmap {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+            gap: 6px;
+        }}
+
+        .streak-cell {{
+            border-radius: 6px;
+            padding: 10px 6px;
+            text-align: center;
+            position: relative;
+            transition: transform 0.1s, box-shadow 0.1s;
+            border: 1px solid rgba(255,255,255,0.04);
+        }}
+
+        .streak-cell:hover {{
+            transform: scale(1.05);
+            z-index: 1;
+        }}
+
+        .streak-cell .streak-k {{
+            font-size: 18px;
+            font-weight: 700;
+            color: #fff;
+            display: block;
+            margin-bottom: 2px;
+        }}
+
+        .streak-cell .streak-pct {{
+            font-size: 11px;
+            font-weight: 500;
+            color: rgba(255,255,255,0.85);
+        }}
+
+        .streak-legend {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 16px;
+            font-size: 11px;
+            color: #666;
+        }}
+
+        .streak-legend-bar {{
+            width: 160px;
+            height: 8px;
+            border-radius: 4px;
+            background: linear-gradient(to right, rgba(255,255,255,0.03), #4CAF50);
+        }}
+
+        .streak-legend-bar.loss-bar {{
+            background: linear-gradient(to right, rgba(255,255,255,0.03), #f44336);
+        }}
+
         @media (max-width: 1000px) {{
             .top-row {{
                 grid-template-columns: 1fr;
@@ -975,6 +1162,33 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
                 {kelly_table_html}
             </div>
         </div>
+
+        <!-- Streak Probability Section -->
+        <div class="panel streak-section" style="padding: 20px;">
+            <div class="streak-header">
+                <div class="streak-header-left">
+                    <h2>Streak Probabilities</h2>
+                    <span class="streak-winrate">Win Rate: {_fmt_pct(bt.win_rate)}</span>
+                </div>
+                <div class="streak-slider-wrap">
+                    <label for="streak-slider">Trades:</label>
+                    <input type="range" id="streak-slider" min="1" max="100000" value="{bt.total_trades}" step="1">
+                    <span id="streak-n-display">{bt.total_trades:,}</span>
+                </div>
+            </div>
+            <div class="streak-grid">
+                <div class="streak-col">
+                    <div class="streak-col-title win">Winning Streaks</div>
+                    <div class="streak-heatmap" id="streak-win-grid"></div>
+                    <div class="streak-legend"><span>0%</span><div class="streak-legend-bar"></div><span>100%</span></div>
+                </div>
+                <div class="streak-col">
+                    <div class="streak-col-title loss">Losing Streaks</div>
+                    <div class="streak-heatmap" id="streak-loss-grid"></div>
+                    <div class="streak-legend"><span>0%</span><div class="streak-legend-bar loss-bar"></div><span>100%</span></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -988,6 +1202,76 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
                 Plotly.Plots.resize(plot);
             }});
         }}, 100);
+
+        // Streak probability computation (Feller's recurrence)
+        (function() {{
+            const WIN_RATE = {bt.win_rate};
+            const STREAK_LENGTHS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 18, 20, 25, 30];
+
+            function probStreakAtLeast(p, k, N) {{
+                if (k <= 0 || N <= 0) return 0;
+                if (k === 1) return 1 - Math.pow(1 - p, N);
+                if (N < k) return Math.pow(p, N);
+                var q = 1 - p;
+                var f = new Float64Array(N + 1);
+                for (var i = 0; i < k; i++) f[i] = 1.0;
+                for (var n = k; n <= N; n++) {{
+                    var s = 0;
+                    var pk = 1;
+                    for (var j = 0; j < k; j++) {{
+                        s += pk * f[n - 1 - j];
+                        pk *= p;
+                    }}
+                    f[n] = q * s;
+                }}
+                return 1 - f[N];
+            }}
+
+            function makeCell(k, prob, type) {{
+                var pct = (prob * 100).toFixed(1);
+                var intensity = prob;
+                var bg, shadow;
+                if (type === 'win') {{
+                    bg = 'rgba(76, 175, 80, ' + (intensity * 0.55 + 0.05).toFixed(3) + ')';
+                    shadow = prob > 0.5 ? '0 0 12px rgba(76, 175, 80, ' + (intensity * 0.4).toFixed(2) + ')' : 'none';
+                }} else {{
+                    bg = 'rgba(244, 67, 54, ' + (intensity * 0.55 + 0.05).toFixed(3) + ')';
+                    shadow = prob > 0.5 ? '0 0 12px rgba(244, 67, 54, ' + (intensity * 0.4).toFixed(2) + ')' : 'none';
+                }}
+                return '<div class="streak-cell" style="background:' + bg + ';box-shadow:' + shadow + '">'
+                     + '<span class="streak-k">' + k + '</span>'
+                     + '<span class="streak-pct">' + pct + '%</span></div>';
+            }}
+
+            function buildGrid(N) {{
+                var winGrid = document.getElementById('streak-win-grid');
+                var lossGrid = document.getElementById('streak-loss-grid');
+                var winHtml = '', lossHtml = '';
+                for (var i = 0; i < STREAK_LENGTHS.length; i++) {{
+                    var k = STREAK_LENGTHS[i];
+                    var pWin = probStreakAtLeast(WIN_RATE, k, N);
+                    var pLoss = probStreakAtLeast(1 - WIN_RATE, k, N);
+                    winHtml += makeCell(k, pWin, 'win');
+                    lossHtml += makeCell(k, pLoss, 'loss');
+                }}
+                winGrid.innerHTML = winHtml;
+                lossGrid.innerHTML = lossHtml;
+            }}
+
+            var slider = document.getElementById('streak-slider');
+            var display = document.getElementById('streak-n-display');
+            var debounceTimer = null;
+
+            function onSliderChange() {{
+                var N = parseInt(slider.value);
+                display.textContent = N.toLocaleString();
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(function() {{ buildGrid(N); }}, 30);
+            }}
+
+            slider.addEventListener('input', onSliderChange);
+            buildGrid({bt.total_trades});
+        }})();
     </script>
 </body>
 </html>'''

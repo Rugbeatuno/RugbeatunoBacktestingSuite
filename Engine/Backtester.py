@@ -111,6 +111,7 @@ class Backtester:
         self.sharpe_ratio: float = None
         self.sortino_ratio: float = None
         self.profit_factor: float = None
+        self.profit_factor_granular: float = None
 
         self.alpha: float = None
         self.beta: float = None
@@ -323,13 +324,21 @@ class Backtester:
         else:
             self.sortino_ratio = 0.0
 
-        # profit factor
+        # profit factor (trade-level)
         total_gains = trade_returns[trade_returns > 0].sum()
         total_losses = -trade_returns[trade_returns < 0].sum()
         if total_losses > 0:
             self.profit_factor = total_gains / total_losses
         else:
             self.profit_factor = float('inf')
+
+        # profit factor (bar-level / granular — Timothy Masters)
+        granular_gains = self.candle_pnl[self.candle_pnl > 0].sum()
+        granular_losses = -self.candle_pnl[self.candle_pnl < 0].sum()
+        if granular_losses > 0:
+            self.profit_factor_granular = granular_gains / granular_losses
+        else:
+            self.profit_factor_granular = float('inf')
 
         # self.annualized_return = (1 + mean_ret) ** bars_annually - 1
         # self.annualized_vol = std_ret * np.sqrt(bars_annually)
