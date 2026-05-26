@@ -101,11 +101,31 @@ class Backtester:
         self.largest_loss: float = None
         self.expected_value: float = None
 
-        # Short and long trade metrics
-        self.short_trades_won: int = None
-        self.long_trades_won: int = None
-        self.short_trades_winrate: float = None
-        self.long_trades_winrate: float = None
+        # Long trade metrics
+        self.long_total_trades: int = None
+        self.long_winning_trades: int = None
+        self.long_losing_trades: int = None
+        self.long_win_rate: float = None
+        self.long_average_win: float = None
+        self.long_average_loss: float = None
+        self.long_average_pnl: float = None
+        self.long_cumulative_pnl: float = None
+        self.long_largest_win: float = None
+        self.long_largest_loss: float = None
+        self.long_profit_factor: float = None
+
+        # Short trade metrics
+        self.short_total_trades: int = None
+        self.short_winning_trades: int = None
+        self.short_losing_trades: int = None
+        self.short_win_rate: float = None
+        self.short_average_win: float = None
+        self.short_average_loss: float = None
+        self.short_average_pnl: float = None
+        self.short_cumulative_pnl: float = None
+        self.short_largest_win: float = None
+        self.short_largest_loss: float = None
+        self.short_profit_factor: float = None
 
         self.CAGR: float = None
         self.sharpe_ratio: float = None
@@ -161,15 +181,12 @@ class Backtester:
         Sortino Ratio:     {number_format(self.sortino_ratio)}
         Profit Factor:     {number_format(self.profit_factor)}
         '''
-        # Short Trades Won:     {self.short_trades_won}
-        # Long Trades Won:      {self.long_trades_won}
-        # Short Trades Winrate: {percentage_format(self.short_trades_winrate)}
-        # Long Trades Winrate:  {percentage_format(self.long_trades_winrate)}
 
     def full_backtest(self) -> None:
         self.quick_backtest()
         self.calculate_drawdown_metrics()
         self.calculate_winlose_metrics()
+        self.calculate_long_short_metrics()
         self.calculate_performance_metrics()
         self.calculate_alpha_beta()
         self.calculate_kelly_criterion()
@@ -265,9 +282,6 @@ class Backtester:
         else:
             self.ratio_avg_win_loss = np.nan
 
-        # !todo missing calculation for the number of winning long trades vs winning short trades
-        # !todo hard todo because you have to pair the signal to the returns
-
         # overwrite trade_returns to comput max consecutive
         winning_consec = np.where(trade_returns > 0, 1, 0)
         losing_consec = np.where(trade_returns < 0, 1, 0)
@@ -292,6 +306,75 @@ class Backtester:
                 self.win_rate * self.average_win +
                 (1 - self.win_rate) * self.average_loss
             )
+
+    def calculate_long_short_metrics(self):
+        boundaries = np.flatnonzero(self.trade_indicies)
+        trade_returns = np.add.reduceat(self.candle_pnl, boundaries)
+        trade_directions = self.signal[boundaries]
+
+        long_mask = trade_directions > 0
+        short_mask = trade_directions < 0
+
+        long_returns = trade_returns[long_mask]
+        short_returns = trade_returns[short_mask]
+
+        # Long metrics
+        self.long_total_trades = len(long_returns)
+        if self.long_total_trades > 0:
+            long_wins = long_returns[long_returns > 0]
+            long_losses = long_returns[long_returns < 0]
+            self.long_winning_trades = len(long_wins)
+            self.long_losing_trades = len(long_losses)
+            self.long_win_rate = self.long_winning_trades / self.long_total_trades
+            self.long_average_win = long_wins.mean() if len(long_wins) > 0 else np.nan
+            self.long_average_loss = long_losses.mean() if len(long_losses) > 0 else np.nan
+            self.long_average_pnl = long_returns.mean()
+            self.long_cumulative_pnl = long_returns.sum()
+            self.long_largest_win = long_wins.max() if len(long_wins) > 0 else np.nan
+            self.long_largest_loss = long_losses.min() if len(long_losses) > 0 else np.nan
+            total_long_gains = long_wins.sum() if len(long_wins) > 0 else 0
+            total_long_losses = -long_losses.sum() if len(long_losses) > 0 else 0
+            self.long_profit_factor = total_long_gains / total_long_losses if total_long_losses > 0 else float('inf')
+        else:
+            self.long_winning_trades = 0
+            self.long_losing_trades = 0
+            self.long_win_rate = np.nan
+            self.long_average_win = np.nan
+            self.long_average_loss = np.nan
+            self.long_average_pnl = np.nan
+            self.long_cumulative_pnl = 0.0
+            self.long_largest_win = np.nan
+            self.long_largest_loss = np.nan
+            self.long_profit_factor = np.nan
+
+        # Short metrics
+        self.short_total_trades = len(short_returns)
+        if self.short_total_trades > 0:
+            short_wins = short_returns[short_returns > 0]
+            short_losses = short_returns[short_returns < 0]
+            self.short_winning_trades = len(short_wins)
+            self.short_losing_trades = len(short_losses)
+            self.short_win_rate = self.short_winning_trades / self.short_total_trades
+            self.short_average_win = short_wins.mean() if len(short_wins) > 0 else np.nan
+            self.short_average_loss = short_losses.mean() if len(short_losses) > 0 else np.nan
+            self.short_average_pnl = short_returns.mean()
+            self.short_cumulative_pnl = short_returns.sum()
+            self.short_largest_win = short_wins.max() if len(short_wins) > 0 else np.nan
+            self.short_largest_loss = short_losses.min() if len(short_losses) > 0 else np.nan
+            total_short_gains = short_wins.sum() if len(short_wins) > 0 else 0
+            total_short_losses = -short_losses.sum() if len(short_losses) > 0 else 0
+            self.short_profit_factor = total_short_gains / total_short_losses if total_short_losses > 0 else float('inf')
+        else:
+            self.short_winning_trades = 0
+            self.short_losing_trades = 0
+            self.short_win_rate = np.nan
+            self.short_average_win = np.nan
+            self.short_average_loss = np.nan
+            self.short_average_pnl = np.nan
+            self.short_cumulative_pnl = 0.0
+            self.short_largest_win = np.nan
+            self.short_largest_loss = np.nan
+            self.short_profit_factor = np.nan
 
     def calculate_performance_metrics(self):
         bars_annually = bars_per_year(self.timeframe)

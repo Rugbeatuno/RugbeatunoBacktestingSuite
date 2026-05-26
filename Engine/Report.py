@@ -421,22 +421,82 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         </div>
 
         <div class="stat-section">
-            <h3>Extremes</h3>
+            <h3>Long Trades</h3>
+            <div class="stat-row">
+                <span class="stat-label">Total</span>
+                <span class="stat-value">{bt.long_total_trades:,}</span>
+            </div>
+            <div class="stat-row highlight">
+                <span class="stat-label">Win Rate</span>
+                <span class="stat-value">{_fmt_pct(bt.long_win_rate)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Avg Win</span>
+                <span class="stat-value positive">{_fmt_dollar(bt.long_average_win)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Avg Loss</span>
+                <span class="stat-value negative">{_fmt_dollar(bt.long_average_loss)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Avg PnL / Trade</span>
+                <span class="stat-value {'positive' if (bt.long_average_pnl or 0) >= 0 else 'negative'}">{_fmt_dollar(bt.long_average_pnl)}</span>
+            </div>
+            <div class="stat-row highlight">
+                <span class="stat-label">Cumulative PnL</span>
+                <span class="stat-value {'positive' if (bt.long_cumulative_pnl or 0) >= 0 else 'negative'}">{_fmt_dollar(bt.long_cumulative_pnl)}</span>
+            </div>
             <div class="stat-row">
                 <span class="stat-label">Largest Win</span>
-                <span class="stat-value positive">{_fmt_dollar(bt.largest_win)}</span>
+                <span class="stat-value positive">{_fmt_dollar(bt.long_largest_win)}</span>
             </div>
             <div class="stat-row">
                 <span class="stat-label">Largest Loss</span>
-                <span class="stat-value negative">{_fmt_dollar(bt.largest_loss)}</span>
+                <span class="stat-value negative">{_fmt_dollar(bt.long_largest_loss)}</span>
             </div>
             <div class="stat-row">
-                <span class="stat-label">Max Consec Wins</span>
-                <span class="stat-value">{bt.max_consec_wins}</span>
+                <span class="stat-label">Profit Factor</span>
+                <span class="stat-value">{bt.long_profit_factor:.2f}</span>
+            </div>
+        </div>
+
+        <div class="stat-section">
+            <h3>Short Trades</h3>
+            <div class="stat-row">
+                <span class="stat-label">Total</span>
+                <span class="stat-value">{bt.short_total_trades:,}</span>
+            </div>
+            <div class="stat-row highlight">
+                <span class="stat-label">Win Rate</span>
+                <span class="stat-value">{_fmt_pct(bt.short_win_rate)}</span>
             </div>
             <div class="stat-row">
-                <span class="stat-label">Max Consec Losses</span>
-                <span class="stat-value">{bt.max_consec_losses}</span>
+                <span class="stat-label">Avg Win</span>
+                <span class="stat-value positive">{_fmt_dollar(bt.short_average_win)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Avg Loss</span>
+                <span class="stat-value negative">{_fmt_dollar(bt.short_average_loss)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Avg PnL / Trade</span>
+                <span class="stat-value {'positive' if (bt.short_average_pnl or 0) >= 0 else 'negative'}">{_fmt_dollar(bt.short_average_pnl)}</span>
+            </div>
+            <div class="stat-row highlight">
+                <span class="stat-label">Cumulative PnL</span>
+                <span class="stat-value {'positive' if (bt.short_cumulative_pnl or 0) >= 0 else 'negative'}">{_fmt_dollar(bt.short_cumulative_pnl)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Largest Win</span>
+                <span class="stat-value positive">{_fmt_dollar(bt.short_largest_win)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Largest Loss</span>
+                <span class="stat-value negative">{_fmt_dollar(bt.short_largest_loss)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Profit Factor</span>
+                <span class="stat-value">{bt.short_profit_factor:.2f}</span>
             </div>
         </div>
 
@@ -453,6 +513,26 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             <div class="stat-row">
                 <span class="stat-label">Duration</span>
                 <span class="stat-value">{dd_dur_str}</span>
+            </div>
+        </div>
+
+        <div class="stat-section">
+            <h3>Extremes</h3>
+            <div class="stat-row">
+                <span class="stat-label">Largest Win</span>
+                <span class="stat-value positive">{_fmt_dollar(bt.largest_win)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Largest Loss</span>
+                <span class="stat-value negative">{_fmt_dollar(bt.largest_loss)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Max Consec Wins</span>
+                <span class="stat-value">{bt.max_consec_wins}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Max Consec Losses</span>
+                <span class="stat-value">{bt.max_consec_losses}</span>
             </div>
         </div>
 
