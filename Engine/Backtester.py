@@ -539,6 +539,61 @@ class Backtester:
         plt.title('Total Trade Returns (PNL) by Entry Time')
         plt.show()
 
+    def bootstrap_mc_drawdown(self, iterations: int = 10000, max_paths: int = 100, max_points: int = 100) -> dict:
+        boundaries = np.flatnonzero(self.trade_indicies)
+        trade_returns = np.add.reduceat(self.candle_pnl, boundaries)
+        n_trades = len(trade_returns)
+        rng = np.random.default_rng()
+
+        n_paths = min(max_paths, iterations)
+        path_samples = rng.choice(trade_returns, size=(n_paths, n_trades), replace=True)
+        path_equity = np.cumsum(path_samples, axis=1)
+
+        # Compute drawdown curves for plotted paths
+        path_peaks = np.maximum.accumulate(path_equity, axis=1)
+        path_drawdowns = path_equity - path_peaks
+
+        # Downsample for plotting
+        step = max(1, n_trades // max_points)
+        path_x = np.arange(0, n_trades, step)
+        dd_paths_downsampled = path_drawdowns[:, path_x]
+
+        # Original drawdown path (trade-level)
+        original_equity = trade_returns.cumsum()
+        original_dd = original_equity - np.maximum.accumulate(original_equity)
+        original_dd_downsampled = original_dd[path_x]
+
+        # Max drawdown for plotted paths
+        max_dds = np.empty(iterations)
+        max_dds[:n_paths] = path_drawdowns.min(axis=1)
+
+        # Remaining iterations: only need max drawdown
+        remaining = iterations - n_paths
+        chunk_size = 2000
+        for i in range(0, remaining, chunk_size):
+            batch = min(chunk_size, remaining - i)
+            samples = rng.choice(trade_returns, size=(batch, n_trades), replace=True)
+            eq = np.cumsum(samples, axis=1)
+            peaks = np.maximum.accumulate(eq, axis=1)
+            max_dds[n_paths + i:n_paths + i + batch] = (eq - peaks).min(axis=1)
+
+        ci_95 = (float(np.percentile(max_dds, 2.5)), float(np.percentile(max_dds, 97.5)))
+        ci_997 = (float(np.percentile(max_dds, 0.15)), float(np.percentile(max_dds, 99.85)))
+
+        return {
+            'dd_paths': dd_paths_downsampled,
+            'path_x': path_x,
+            'original_dd_path': original_dd_downsampled,
+            'max_drawdowns': max_dds,
+            'original_max_dd': float(original_dd.min()),
+            'mean_max_dd': float(max_dds.mean()),
+            'median_max_dd': float(np.median(max_dds)),
+            'ci_95': ci_95,
+            'ci_997': ci_997,
+            'iterations': iterations,
+            'n_trades': n_trades,
+        }
+
     def bootstrap_mc_resampling(self, iterations: int = 10000, max_paths: int = 300, max_points: int = 100) -> dict:
         boundaries = np.flatnonzero(self.trade_indicies)
         trade_returns = np.add.reduceat(self.candle_pnl, boundaries)

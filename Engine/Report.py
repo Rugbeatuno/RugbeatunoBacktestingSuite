@@ -86,21 +86,114 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         )],
     )
 
-    # 2. Drawdown chart
+    # Drawdown duration formatting
+    dd_duration = bt.max_drawdown_duration
+    if hasattr(dd_duration, 'days'):
+        dd_dur_str = f'{dd_duration.days}d {dd_duration.seconds // 3600}h {(dd_duration.seconds % 3600) // 60}m'
+    else:
+        dd_dur_str = str(dd_duration)
+
+    # 2. Enhanced Drawdown chart — highlight max drawdown period
+    # Find max drawdown period in trade-level data
+    dd_end_idx = np.argmin(trade_drawdown)
+    dd_start_idx = np.argmax(trade_equity[:dd_end_idx]) if dd_end_idx > 0 else 0
+    dd_duration_trades = dd_end_idx - dd_start_idx
+
     fig_drawdown = go.Figure()
     fig_drawdown.add_trace(go.Scatter(
         x=plot_x, y=plot_drawdown,
-        fill='tozeroy', fillcolor='rgba(244,67,54,0.3)',
+        fill='tozeroy', fillcolor='rgba(244,67,54,0.15)',
         line=dict(color='#f44336', width=1),
         hovertemplate='Trade #%{x}<br>Drawdown: $%{y:,.2f}<extra></extra>'
     ))
+    # Highlight max drawdown region
+    fig_drawdown.add_vrect(
+        x0=dd_start_idx + 1, x1=dd_end_idx + 1,
+        fillcolor='rgba(244,67,54,0.12)', line_width=0,
+    )
+    # Annotation for max drawdown — position at 40% of the way from trough to 0
+    dd_annotation_y = trade_drawdown[dd_end_idx] * 0.6
+    dd_min = trade_drawdown[dd_end_idx]
+    fig_drawdown.add_annotation(
+        x=(dd_start_idx + dd_end_idx) / 2 + 1,
+        y=dd_annotation_y,
+        text=f'Max DD: ${dd_min:,.0f}<br>{dd_duration_trades} trades | {dd_dur_str}',
+        showarrow=True, arrowhead=2, arrowcolor='#f44336',
+        ax=0, ay=0,
+        yanchor='bottom',
+        font=dict(size=11, color='#f44336'),
+        bgcolor='rgba(26,26,26,0.8)', bordercolor='#f44336', borderwidth=1,
+    )
+    # Pad y-axis so trough + annotation always visible
     fig_drawdown.update_layout(
         margin=dict(l=50, r=20, t=30, b=50),
+        hovermode='x unified',
+        xaxis=dict(title='Trade #', showgrid=True, gridcolor='#2a2a2a'),
+        yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$',
+                   range=[dd_min * 1.15, abs(dd_min) * 0.05]),
+        paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
+        font=dict(color='#e0e0e0'),
+    )
+
+    # 2b. Bootstrap MC Drawdown
+    mc_dd_data = bt.bootstrap_mc_drawdown(
+        iterations=10000, max_paths=100, max_points=100)
+
+    # Left panel: drawdown paths
+    fig_mc_dd_paths = go.Figure()
+    for i in range(mc_dd_data['dd_paths'].shape[0]):
+        fig_mc_dd_paths.add_trace(go.Scatter(
+            x=mc_dd_data['path_x'], y=mc_dd_data['dd_paths'][i],
+            mode='lines', line=dict(color='rgba(100,100,100,0.25)', width=0.7),
+            hoverinfo='skip', showlegend=False,
+        ))
+    fig_mc_dd_paths.add_trace(go.Scatter(
+        x=mc_dd_data['path_x'], y=mc_dd_data['original_dd_path'],
+        mode='lines', line=dict(color='#f44336', width=2.5),
+        name='Original', hovertemplate='Trade %{x}<br>DD: $%{y:,.2f}<extra></extra>',
+    ))
+    fig_mc_dd_paths.update_layout(
+        margin=dict(l=50, r=20, t=30, b=20),
         hovermode='x unified',
         xaxis=dict(title='Trade #', showgrid=True, gridcolor='#2a2a2a'),
         yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
         paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
         font=dict(color='#e0e0e0'),
+        legend=dict(x=0.5, y=1.12, xanchor='center', yanchor='top',
+                    orientation='h', bgcolor='rgba(0,0,0,0)'),
+    )
+
+    # Middle panel: histogram of max drawdowns
+    fig_mc_dd_hist = go.Figure()
+    fig_mc_dd_hist.add_trace(go.Histogram(
+        x=mc_dd_data['max_drawdowns'], nbinsx=80,
+        marker=dict(color='rgba(244, 67, 54, 0.6)', line=dict(
+            color='rgba(244, 67, 54, 0.9)', width=0.5)),
+        hovertemplate='Max DD: $%{x:,.0f}<br>Count: %{y}<extra></extra>',
+    ))
+    fig_mc_dd_hist.add_vline(x=mc_dd_data['original_max_dd'],
+                             line=dict(color='#f44336', width=2.5),
+                             annotation_text='Original', annotation_position='top')
+    fig_mc_dd_hist.add_vrect(x0=mc_dd_data['ci_95'][0], x1=mc_dd_data['ci_95'][1],
+                             fillcolor='rgba(255, 152, 0, 0.12)', line_width=0,
+                             annotation_text='95% CI', annotation_position='top left')
+    fig_mc_dd_hist.add_vline(x=mc_dd_data['ci_95'][0], line=dict(
+        color='#FF9800', width=1.5, dash='dot'))
+    fig_mc_dd_hist.add_vline(x=mc_dd_data['ci_95'][1], line=dict(
+        color='#FF9800', width=1.5, dash='dot'))
+    fig_mc_dd_hist.add_vline(x=mc_dd_data['ci_997'][0], line=dict(
+        color='#9C27B0', width=1, dash='dashdot'))
+    fig_mc_dd_hist.add_vline(x=mc_dd_data['ci_997'][1], line=dict(
+        color='#9C27B0', width=1, dash='dashdot'))
+    fig_mc_dd_hist.update_layout(
+        margin=dict(l=50, r=20, t=30, b=95),
+        xaxis=dict(title='Max Drawdown ($)', showgrid=True,
+                   gridcolor='#2a2a2a', tickprefix='$', tickformat=',.0f',
+                   showticklabels=True, tickangle=0, tickfont=dict(size=11)),
+        yaxis=dict(title='Frequency', showgrid=True, gridcolor='#2a2a2a'),
+        paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
+        font=dict(color='#e0e0e0'),
+        showlegend=False,
     )
 
     # 3. Bootstrap MC Resampling
@@ -309,12 +402,46 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         kelly_table_html += f'<tr{highlight}><td>{label}</td><td>{f_val:.2%}</td><td>${final_eq:,.0f}</td><td>{g_val:.5f}</td></tr>'
     kelly_table_html += '</tbody></table></div>'
 
+    # MC Drawdown CI text panel
+    mc_dd_ci_html = f'''
+    <div class="mc-ci-section">
+        <h3>Bootstrap Max Drawdown</h3>
+        <div class="mc-ci-big negative">{_fmt_dollar(mc_dd_data['mean_max_dd'])}</div>
+        <div class="mc-ci-block">
+            <div class="mc-ci-label">95% Confidence Interval</div>
+            <div class="mc-ci-range ci-95-color">{_fmt_dollar(mc_dd_data['ci_95'][0])} — {_fmt_dollar(mc_dd_data['ci_95'][1])}</div>
+            <div class="mc-ci-bar">
+                <div class="mc-ci-fill-95"></div>
+                <div class="mc-ci-marker"></div>
+            </div>
+        </div>
+        <div class="mc-ci-block">
+            <div class="mc-ci-label">99.7% Confidence Interval</div>
+            <div class="mc-ci-range ci-997-color">{_fmt_dollar(mc_dd_data['ci_997'][0])} — {_fmt_dollar(mc_dd_data['ci_997'][1])}</div>
+            <div class="mc-ci-bar">
+                <div class="mc-ci-fill-997"></div>
+                <div class="mc-ci-marker"></div>
+            </div>
+        </div>
+        <div class="mc-ci-substat">
+            <span>Median: {_fmt_dollar(mc_dd_data['median_max_dd'])}</span>
+            <span>{mc_dd_data['iterations']:,} iterations</span>
+        </div>
+    </div>
+    '''
+
     # --- Convert figures to HTML divs ---
     equity_html = fig_equity.to_html(
         full_html=False, include_plotlyjs=False, div_id='equity-chart',
         config={'responsive': True})
     drawdown_html = fig_drawdown.to_html(
         full_html=False, include_plotlyjs=False, div_id='drawdown-chart',
+        config={'responsive': True})
+    mc_dd_paths_html = fig_mc_dd_paths.to_html(
+        full_html=False, include_plotlyjs=False, div_id='mc-dd-paths-chart',
+        config={'responsive': True})
+    mc_dd_hist_html = fig_mc_dd_hist.to_html(
+        full_html=False, include_plotlyjs=False, div_id='mc-dd-hist-chart',
         config={'responsive': True})
     mc_paths_html = fig_mc_paths.to_html(
         full_html=False, include_plotlyjs=False, div_id='mc-paths-chart',
@@ -325,13 +452,6 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
     kelly_chart_html = fig_kelly.to_html(
         full_html=False, include_plotlyjs=False, div_id='kelly-chart',
         config={'responsive': True})
-
-    # Drawdown duration formatting
-    dd_duration = bt.max_drawdown_duration
-    if hasattr(dd_duration, 'days'):
-        dd_dur_str = f'{dd_duration.days}d {dd_duration.seconds // 3600}h {(dd_duration.seconds % 3600) // 60}m'
-    else:
-        dd_dur_str = str(dd_duration)
 
     # --- EV box (top right) ---
     ev_html = f'''
@@ -1214,6 +1334,21 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             <div class="panel chart-panel">
                 <div class="panel-title">Drawdown</div>
                 {drawdown_html}
+            </div>
+        </div>
+
+        <!-- Monte Carlo Drawdown Bootstrap Section -->
+        <div class="mc-row">
+            <div class="panel chart-panel">
+                <div class="panel-title">Bootstrapped MC — Drawdown Paths</div>
+                {mc_dd_paths_html}
+            </div>
+            <div class="panel chart-panel">
+                <div class="panel-title">Bootstrapped MC — Max Drawdown Distribution</div>
+                {mc_dd_hist_html}
+            </div>
+            <div class="panel" style="padding: 0;">
+                {mc_dd_ci_html}
             </div>
         </div>
 
