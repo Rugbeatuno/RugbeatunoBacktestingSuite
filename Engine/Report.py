@@ -114,7 +114,8 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         x=plot_x, y=plot_drawdown,
         fill='tozeroy', fillcolor='rgba(244,67,54,0.15)',
         line=dict(color='#f44336', width=1),
-        hovertemplate='Trade #%{x}<br>Drawdown: $%{y:,.2f}<extra></extra>'
+        hovertemplate='Trade #%{x}<br>Drawdown: $%{y:,.2f}<extra></extra>',
+        cliponaxis=False
     ))
     # Highlight max drawdown region
     fig_drawdown.add_vrect(
@@ -140,8 +141,8 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         hovermode='x unified',
         xaxis=dict(title=dict(text='Trade #', standoff=5), showgrid=True,
                    gridcolor='#2a2a2a', side='top'),
-        yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$',
-                   range=[dd_min * 1.15, 0]),
+        yaxis=dict(showgrid=True, gridcolor='#2a2a2a',
+                   tickprefix='$'),
         paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
         font=dict(color='#e0e0e0'),
     )
@@ -171,7 +172,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
         paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
         font=dict(color='#e0e0e0'),
-        legend=dict(x=0.5, y=1.12, xanchor='center', yanchor='top',
+        legend=dict(x=0.5, y=1.12, xanchor='center', yanchor='bottom',
                     orientation='h', bgcolor='rgba(0,0,0,0)'),
     )
 
@@ -308,8 +309,8 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             </div>
         </div>
         <div class="mc-ci-substat">
+            <span>Median: {_fmt_dollar(np.median(mc_data['final_pnls']))}</span>
             <span>{mc_data['iterations']:,} iterations</span>
-            <span>{mc_data['n_trades']:,} trades</span>
         </div>
     </div>
     '''
@@ -473,7 +474,8 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         increasing_line_color='#4CAF50', decreasing_line_color='#f44336',
         increasing_fillcolor='#4CAF50', decreasing_fillcolor='#f44336',
         name='Price', showlegend=False,
-        text=[f'{tv_date_strs[k]}<br>O:{tv_open[k]:.2f} H:{tv_high[k]:.2f} L:{tv_low[k]:.2f} C:{tv_close[k]:.2f}' for k in range(n_total)],
+        text=[f'{tv_date_strs[k]}<br>O:{tv_open[k]:.2f} H:{tv_high[k]:.2f} L:{tv_low[k]:.2f} C:{tv_close[k]:.2f}' for k in range(
+            n_total)],
         hoverinfo='text',
     ), row=1, col=1)
 
@@ -1023,7 +1025,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         }}
 
         .below-fold .panel {{
-            height: 330px;
+            height: 480px;
         }}
 
         /* Monte Carlo section */
@@ -1035,7 +1037,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         }}
 
         .mc-row .panel {{
-            height: 420px;
+            height: 450px;
         }}
 
         /* MC CI text panel */
@@ -1414,7 +1416,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
                 height: auto;
             }}
             .top-row .chart-panel {{
-                height: 350px;
+                height: 330px;
             }}
         }}
     </style>
