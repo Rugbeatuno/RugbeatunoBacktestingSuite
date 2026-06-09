@@ -40,13 +40,19 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
     trade_drawdown = trade_equity - np.maximum.accumulate(trade_equity)
     trade_x = np.arange(1, len(trade_equity) + 1)
 
+    # Buy & hold sampled at trade boundaries
+    trade_buyhold = buyhold_equity[boundaries]
+
+    # Trade dates (timestamp at each trade boundary)
+    trade_dates = bt.indicies[boundaries]
+
     # Downsample for plotting (by trade number)
     step = max(1, len(trade_equity) // 2000)
     plot_x = trade_x[::step]
     plot_equity = trade_equity[::step]
-    plot_buyhold = np.linspace(
-        buyhold_equity[0], buyhold_equity[-1], len(plot_x))
+    plot_buyhold = trade_buyhold[::step]
     plot_drawdown = trade_drawdown[::step]
+    plot_dates = trade_dates[::step]
 
     # Date range string
     start_str = bt.start_date.strftime('%Y-%m-%d')
@@ -57,15 +63,18 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
 
     # 1. Main equity chart
     fig_equity = go.Figure()
+    plot_date_strs = [d.strftime('%Y-%m-%d %H:%M') for d in plot_dates]
     fig_equity.add_trace(go.Scatter(
         x=plot_x, y=plot_equity,
+        customdata=plot_date_strs,
         name='Strategy', line=dict(color='#2196F3', width=1.5),
-        hovertemplate='Trade #%{x}<br>Equity: $%{y:,.2f}<extra></extra>'
+        hovertemplate='Trade #%{x} | %{customdata}<br>Equity: $%{y:,.2f}<extra></extra>'
     ))
     fig_equity.add_trace(go.Scatter(
         x=plot_x, y=plot_buyhold,
+        customdata=plot_date_strs,
         name='Buy & Hold', line=dict(color='#9E9E9E', width=1, dash='dot'),
-        hovertemplate='Trade #%{x}<br>B&H: $%{y:,.2f}<extra></extra>'
+        hovertemplate='Trade #%{x} | %{customdata}<br>B&H: $%{y:,.2f}<extra></extra>'
     ))
     fig_equity.update_layout(
         margin=dict(l=50, r=20, t=30, b=30),
@@ -96,7 +105,8 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
     # 2. Enhanced Drawdown chart — highlight max drawdown period
     # Find max drawdown period in trade-level data
     dd_end_idx = np.argmin(trade_drawdown)
-    dd_start_idx = np.argmax(trade_equity[:dd_end_idx]) if dd_end_idx > 0 else 0
+    dd_start_idx = np.argmax(
+        trade_equity[:dd_end_idx]) if dd_end_idx > 0 else 0
     dd_duration_trades = dd_end_idx - dd_start_idx
 
     fig_drawdown = go.Figure()
@@ -126,11 +136,12 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
     )
     # Pad y-axis so trough + annotation always visible
     fig_drawdown.update_layout(
-        margin=dict(l=50, r=20, t=30, b=50),
+        margin=dict(l=50, r=20, t=50, b=30),
         hovermode='x unified',
-        xaxis=dict(title='Trade #', showgrid=True, gridcolor='#2a2a2a'),
+        xaxis=dict(title=dict(text='Trade #', standoff=5), showgrid=True,
+                   gridcolor='#2a2a2a', side='top'),
         yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$',
-                   range=[dd_min * 1.15, abs(dd_min) * 0.05]),
+                   range=[dd_min * 1.15, 0]),
         paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
         font=dict(color='#e0e0e0'),
     )
@@ -153,9 +164,10 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         name='Original', hovertemplate='Trade %{x}<br>DD: $%{y:,.2f}<extra></extra>',
     ))
     fig_mc_dd_paths.update_layout(
-        margin=dict(l=50, r=20, t=30, b=20),
+        margin=dict(l=50, r=20, t=50, b=20),
         hovermode='x unified',
-        xaxis=dict(title='Trade #', showgrid=True, gridcolor='#2a2a2a'),
+        xaxis=dict(title=dict(text='Trade #', standoff=5), showgrid=True,
+                   gridcolor='#2a2a2a', side='top'),
         yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
         paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
         font=dict(color='#e0e0e0'),
@@ -214,7 +226,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         name='Original', hovertemplate='Trade %{x}<br>PnL: $%{y:,.2f}<extra></extra>',
     ))
     fig_mc_paths.update_layout(
-        margin=dict(l=50, r=20, t=30, b=20),
+        margin=dict(l=50, r=20, t=0, b=50),
         hovermode='x unified',
         xaxis=dict(title='Trade #', showgrid=True, gridcolor='#2a2a2a'),
         yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
@@ -429,6 +441,91 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         </div>
     </div>
     '''
+
+    # 5. Trade Visualization — Price chart with position highlighting + mini equity
+    from plotly.subplots import make_subplots
+
+    # Sequential integer x-axis eliminates weekend gaps; datetime shown via tick labels + hover
+    n_total = len(bt.close_prices)
+    tv_x = np.arange(n_total)
+    tv_open = bt.ohlc[:, 0]
+    tv_high = bt.ohlc[:, 1]
+    tv_low = bt.ohlc[:, 2]
+    tv_close = bt.ohlc[:, 3]
+    tv_signal = bt.signal
+    tv_equity = bt.equity_curve
+    tv_date_strs = [d.strftime('%Y-%m-%d %H:%M') for d in bt.indicies]
+
+    # Build tick labels: evenly spaced datetime labels on the integer axis
+    n_ticks = 10
+    tick_step = max(1, n_total // n_ticks)
+    tv_tickvals = list(range(0, n_total, tick_step))
+    tv_ticktext = [bt.indicies[k].strftime('%Y-%m-%d') for k in tv_tickvals]
+
+    fig_trades = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.75, 0.25], vertical_spacing=0.03,
+    )
+
+    # Candlestick on top panel
+    fig_trades.add_trace(go.Candlestick(
+        x=tv_x, open=tv_open, high=tv_high, low=tv_low, close=tv_close,
+        increasing_line_color='#4CAF50', decreasing_line_color='#f44336',
+        increasing_fillcolor='#4CAF50', decreasing_fillcolor='#f44336',
+        name='Price', showlegend=False,
+        text=[f'{tv_date_strs[k]}<br>O:{tv_open[k]:.2f} H:{tv_high[k]:.2f} L:{tv_low[k]:.2f} C:{tv_close[k]:.2f}' for k in range(n_total)],
+        hoverinfo='text',
+    ), row=1, col=1)
+
+    # Build position regions (consolidate consecutive same-signal bars into rectangles)
+    shapes = []
+    i = 0
+    while i < n_total:
+        sig = tv_signal[i]
+        if sig == 0:
+            i += 1
+            continue
+        j = i
+        while j < n_total and tv_signal[j] == sig:
+            j += 1
+        color = 'rgba(76, 175, 80, 0.08)' if sig == 1 else 'rgba(244, 67, 54, 0.08)'
+        shapes.append(dict(
+            type='rect', xref='x', yref='y domain',
+            x0=i, x1=j - 1,
+            y0=0, y1=1,
+            fillcolor=color, line_width=0, layer='below',
+        ))
+        i = j
+
+    # Equity curve on bottom panel
+    fig_trades.add_trace(go.Scatter(
+        x=tv_x, y=tv_equity,
+        customdata=tv_date_strs,
+        line=dict(color='#2196F3', width=1.5),
+        name='Equity', showlegend=False,
+        hovertemplate='%{customdata}<br>Equity: $%{y:,.2f}<extra></extra>',
+    ), row=2, col=1)
+
+    fig_trades.update_layout(
+        margin=dict(l=50, r=20, t=30, b=30),
+        paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
+        font=dict(color='#e0e0e0'),
+        hovermode='x unified',
+        xaxis=dict(showgrid=True, gridcolor='#2a2a2a', rangeslider_visible=False,
+                   tickvals=tv_tickvals, ticktext=tv_ticktext),
+        yaxis=dict(showgrid=True, gridcolor='#2a2a2a', title='Price'),
+        xaxis2=dict(showgrid=True, gridcolor='#2a2a2a',
+                    tickvals=tv_tickvals, ticktext=tv_ticktext),
+        yaxis2=dict(showgrid=True, gridcolor='#2a2a2a',
+                    title='Equity', tickprefix='$'),
+        shapes=shapes,
+        legend=dict(x=0.5, y=1.05, xanchor='center', orientation='h',
+                    bgcolor='rgba(0,0,0,0)'),
+    )
+
+    trades_chart_html = fig_trades.to_html(
+        full_html=False, include_plotlyjs=False, div_id='trades-chart',
+        config={'responsive': True})
 
     # --- Convert figures to HTML divs ---
     equity_html = fig_equity.to_html(
@@ -693,6 +790,10 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             <div class="stat-row">
                 <span class="stat-label">Commission / Trade</span>
                 <span class="stat-value">{_fmt_dollar(bt.commission)}</span>
+            </div>
+            <div class="stat-row highlight">
+                <span class="stat-label">Friction / Avg Trade</span>
+                <span class="stat-value negative">{_fmt_pct(float(bt.transaction_costs.sum()) / bt.total_trades / abs(trade_returns).mean() if abs(trade_returns).mean() > 0 else 0)}</span>
             </div>
             <div class="stat-row highlight">
                 <span class="stat-label">Total Costs</span>
@@ -1272,10 +1373,18 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             margin-bottom: 2px;
         }}
 
-        .streak-cell .streak-pct {{
+        .streak-cell .streak-dollar {{
             font-size: 11px;
+            font-weight: 600;
+            color: rgba(255,255,255,0.95);
+            display: block;
+            margin-bottom: 1px;
+        }}
+
+        .streak-cell .streak-pct {{
+            font-size: 10px;
             font-weight: 500;
-            color: rgba(255,255,255,0.85);
+            color: rgba(255,255,255,0.6);
         }}
 
         .streak-legend {{
@@ -1327,6 +1436,12 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         <div class="panel" style="margin-bottom: 12px;">
             <div class="panel-title">Backtest Statistics</div>
             {stats_html}
+        </div>
+
+        <!-- Trade Visualization: Price + Position Highlighting + Equity -->
+        <div class="panel chart-panel" style="height: 520px; margin-bottom: 12px;">
+            <div class="panel-title">Trade Visualization</div>
+            {trades_chart_html}
         </div>
 
         <!-- Below fold charts -->
@@ -1404,6 +1519,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
                 </div>
             </div>
         </div>
+
     </div>
 
     <script>
@@ -1418,9 +1534,84 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             }});
         }}, 100);
 
+        // Auto-rescale y-axis on x-zoom for specified charts
+        function attachAutoRescaleY(divId, yAxes) {{
+            var el = document.getElementById(divId);
+            if (!el || !el.on) return false;
+            var busy = false;
+            el.on('plotly_relayout', function(ed) {{
+                if (busy) return;
+                if (ed['xaxis.autorange'] || ed['autosize']) {{
+                    busy = true;
+                    var update = {{}};
+                    yAxes.forEach(function(ya) {{ update[ya.yAxisKey.replace('.range', '.autorange')] = true; }});
+                    Plotly.relayout(el, update).then(function() {{ busy = false; }});
+                    return;
+                }}
+                var xMin = ed['xaxis.range[0]'];
+                var xMax = ed['xaxis.range[1]'];
+                if (xMin == null || xMax == null) return;
+                xMin = parseFloat(xMin);
+                xMax = parseFloat(xMax);
+                var data = el.data;
+                var update = {{}};
+                yAxes.forEach(function(ya) {{
+                    var yMin = Infinity, yMax = -Infinity;
+                    ya.traceIndices.forEach(function(ti) {{
+                        var trace = data[ti];
+                        if (!trace) return;
+                        var xs = trace.x;
+                        if (!xs) return;
+                        for (var i = 0; i < xs.length; i++) {{
+                            var xv = xs[i];
+                            if (xv < xMin || xv > xMax) continue;
+                            if (trace.type === 'candlestick') {{
+                                if (trace.high && trace.high[i] != null) {{
+                                    if (trace.high[i] > yMax) yMax = trace.high[i];
+                                }}
+                                if (trace.low && trace.low[i] != null) {{
+                                    if (trace.low[i] < yMin) yMin = trace.low[i];
+                                }}
+                            }} else {{
+                                var yv = trace.y[i];
+                                if (yv == null) continue;
+                                if (yv < yMin) yMin = yv;
+                                if (yv > yMax) yMax = yv;
+                            }}
+                        }}
+                    }});
+                    if (yMin !== Infinity && yMax !== -Infinity) {{
+                        var pad = (yMax - yMin) * 0.05 || 1;
+                        update[ya.yAxisKey] = [yMin - pad, yMax + pad];
+                    }}
+                }});
+                if (Object.keys(update).length > 0) {{
+                    busy = true;
+                    Plotly.relayout(el, update).then(function() {{ busy = false; }});
+                }}
+            }});
+            return true;
+        }}
+
+        // Attach after Plotly fully initializes the divs
+        setTimeout(function() {{
+            attachAutoRescaleY('equity-chart', [
+                {{traceIndices: [0, 1], yAxisKey: 'yaxis.range'}}
+            ]);
+            attachAutoRescaleY('trades-chart', [
+                {{traceIndices: [0], yAxisKey: 'yaxis.range'}},
+                {{traceIndices: [1], yAxisKey: 'yaxis2.range'}}
+            ]);
+            attachAutoRescaleY('drawdown-chart', [
+                {{traceIndices: [0], yAxisKey: 'yaxis.range'}}
+            ]);
+        }}, 500);
+
         // Streak probability computation (Feller's recurrence)
         (function() {{
             const WIN_RATE = {bt.win_rate};
+            const AVG_WIN = {abs(bt.average_win) if bt.average_win else 0};
+            const AVG_LOSS = {abs(bt.average_loss) if bt.average_loss else 0};
             const STREAK_LENGTHS = [2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 18, 20, 25, 30];
 
             function probStreakAtLeast(p, k, N) {{
@@ -1442,19 +1633,27 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
                 return 1 - f[N];
             }}
 
+            function formatDollar(v) {{
+                if (v >= 1000) return '$' + (v / 1000).toFixed(1) + 'k';
+                return '$' + v.toFixed(0);
+            }}
+
             function makeCell(k, prob, type) {{
                 var pct = (prob * 100).toFixed(1);
                 var intensity = prob;
-                var bg, shadow;
+                var bg, shadow, dollar;
                 if (type === 'win') {{
                     bg = 'rgba(76, 175, 80, ' + (intensity * 0.55 + 0.05).toFixed(3) + ')';
                     shadow = prob > 0.5 ? '0 0 12px rgba(76, 175, 80, ' + (intensity * 0.4).toFixed(2) + ')' : 'none';
+                    dollar = k * AVG_WIN;
                 }} else {{
                     bg = 'rgba(244, 67, 54, ' + (intensity * 0.55 + 0.05).toFixed(3) + ')';
                     shadow = prob > 0.5 ? '0 0 12px rgba(244, 67, 54, ' + (intensity * 0.4).toFixed(2) + ')' : 'none';
+                    dollar = k * AVG_LOSS;
                 }}
                 return '<div class="streak-cell" style="background:' + bg + ';box-shadow:' + shadow + '">'
                      + '<span class="streak-k">' + k + '</span>'
+                     + '<span class="streak-dollar">' + formatDollar(dollar) + '</span>'
                      + '<span class="streak-pct">' + pct + '%</span></div>';
             }}
 
