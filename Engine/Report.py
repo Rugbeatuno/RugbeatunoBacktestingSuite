@@ -157,22 +157,24 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         fig_mc_dd_paths.add_trace(go.Scatter(
             x=mc_dd_data['path_x'], y=mc_dd_data['dd_paths'][i],
             mode='lines', line=dict(color='rgba(100,100,100,0.25)', width=0.7),
-            hoverinfo='skip', showlegend=False,
+            hoverinfo='skip', showlegend=False, cliponaxis=False
         ))
     fig_mc_dd_paths.add_trace(go.Scatter(
         x=mc_dd_data['path_x'], y=mc_dd_data['original_dd_path'],
         mode='lines', line=dict(color='#f44336', width=2.5),
         name='Original', hovertemplate='Trade %{x}<br>DD: $%{y:,.2f}<extra></extra>',
+        cliponaxis=False
     ))
     fig_mc_dd_paths.update_layout(
-        margin=dict(l=50, r=20, t=50, b=20),
+        margin=dict(l=50, r=20, t=30, b=20),
         hovermode='x unified',
-        xaxis=dict(title=dict(text='Trade #', standoff=5), showgrid=True,
-                   gridcolor='#2a2a2a', side='top'),
-        yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
-        paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
+        xaxis=dict(title=dict(text='Trade #', standoff=0), showgrid=True,
+                   gridcolor='#2a2a2a', side='bottom'),
+        yaxis=dict(showgrid=True, gridcolor='#2a2a2a',
+                   tickprefix='$'),
+        paper_bgcolor="#1a1a1a", plot_bgcolor='#1a1a1a',
         font=dict(color='#e0e0e0'),
-        legend=dict(x=0.5, y=1.12, xanchor='center', yanchor='bottom',
+        legend=dict(x=0.5, y=1.12, xanchor='center', yanchor='top',
                     orientation='h', bgcolor='rgba(0,0,0,0)'),
     )
 
@@ -499,14 +501,24 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         ))
         i = j
 
-    # Equity curve on bottom panel
-    fig_trades.add_trace(go.Scatter(
-        x=tv_x, y=tv_equity,
-        customdata=tv_date_strs,
-        line=dict(color='#2196F3', width=1.5),
-        name='Equity', showlegend=False,
-        hovertemplate='%{customdata}<br>Equity: $%{y:,.2f}<extra></extra>',
-    ), row=2, col=1)
+    # Equity curve on bottom panel — green when increasing, red when decreasing
+    eq_colors = np.where(
+        np.diff(tv_equity, prepend=tv_equity[0]) >= 0, '#4CAF50', '#f44336')
+    i_seg = 0
+    while i_seg < n_total:
+        c = eq_colors[i_seg]
+        j_seg = i_seg
+        while j_seg < n_total and eq_colors[j_seg] == c:
+            j_seg += 1
+        sl = slice(max(0, i_seg - 1), min(j_seg + 1, n_total))
+        fig_trades.add_trace(go.Scatter(
+            x=tv_x[sl], y=tv_equity[sl],
+            customdata=[tv_date_strs[k] for k in range(sl.start, sl.stop)],
+            line=dict(color=c, width=1.5),
+            showlegend=False,
+            hovertemplate='%{customdata}<br>Equity: $%{y:,.2f}<extra></extra>',
+        ), row=2, col=1)
+        i_seg = j_seg
 
     fig_trades.update_layout(
         margin=dict(l=50, r=20, t=30, b=30),
@@ -1416,7 +1428,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
                 height: auto;
             }}
             .top-row .chart-panel {{
-                height: 330px;
+                height: 300px;
             }}
         }}
     </style>
