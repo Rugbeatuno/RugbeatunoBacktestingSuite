@@ -1,5 +1,4 @@
 import numpy as np
-from numba import njit
 
 class PropFirm:
 
@@ -82,6 +81,7 @@ class PropFirmSimulator:
 
         # Optimal sizing results
         self.optimal_sizing = None
+        self.optimal_sizing_micros = None
 
         # Funded results
         self.fu_payout_rate = None
@@ -95,6 +95,7 @@ class PropFirmSimulator:
     def run(self):
         self._compute_avg_trades_per_day()
         self._simulate_challenge()
+        self._compute_optimal_sizing()
 
     def _compute_avg_trades_per_day(self):
         bt = self.backtest
@@ -106,22 +107,27 @@ class PropFirmSimulator:
         else:
             self.avg_trades_per_day = bt.total_trades / unique_trading_days
 
-    @njit(fastmath=True)
     def _sample_day_trades(self):
-        n = self.rng.poisson(self.avg_trades_per_day)
-        n = max(n, 1)
+        n = max(self.rng.poisson(self.avg_trades_per_day), 1)
         return self.rng.choice(self.trade_pool, size=n, replace=True)
 
     def _check_consistency(self, daily_pnls):
         pf = self.propfirm
         if pf.ch_consistency_pct <= 0:
             return True
-        total_profit = sum(d for d in daily_pnls if d > 0)
-        if total_profit <= 0:
-            return False
-        max_day_profit = max(daily_pnls)
-        return (max_day_profit / total_profit) <= pf.ch_consistency_pct
+            
+        # Convert to numpy array for C-speed operations
+        total_profit = 0
+        max_day_profit = float('-inf')
 
+        for pnl in daily_pnls:
+            if pnl > 0:
+                total_profit += pnl
+                if pnl > max_day_profit:
+                    max_day_profit = pnl
+        
+        return (max_day_profit / total_profit) <= pf.ch_consistency_pct
+    
     def _simulate_challenge(self):
         pass_count = 0
         days_to_pass = []
@@ -154,7 +160,7 @@ class PropFirmSimulator:
         # Pre-calculate barriers
         upper_barrier = pf.ch_initial_equity + pf.ch_profit_target
         lower_barrier = pf.ch_initial_equity - pf.ch_max_loss
-        daily_profit_cap = pf.ch_profit_target * pf.ch_consistency_pct if pf.ch_consistency_pct > 0 else None
+        daily_profit_cap = pf.ch_profit_target * pf.ch_consistency_pct if pf.ch_consistency_pct > 0 else pf.ch_profit_target
 
         for day in range(pf.ch_time_limit_days):
             trades: np.ndarray = self._sample_day_trades()
@@ -162,17 +168,22 @@ class PropFirmSimulator:
             
             # 1. Apply Daily Profit Cap Circuit Breaker FIRST
             if daily_profit_cap is not None:
-                cap_indices = np.flatnonzero(pnl >= daily_profit_cap)
-                if len(cap_indices) > 0:
-                    first_cap_idx = cap_indices[0]
-                    # Slice the array: the bot stops trading after this index
-                    pnl = pnl[:first_cap_idx + 1]
-                    # Force the final PnL to match the exact cap (simulates a limit exit)
+                cap_index = np.argmax(pnl >= daily_profit_cap)
+                if cap_index > 0:
+                    pnl = pnl[:cap_index + 1]
                     pnl[-1] = daily_profit_cap 
 
             intraday_equity: np.ndarray = equity + pnl
 
-            # 2. Drawdown Checks (Safe from post-cap phantom trades)
+            # 2. Daily Loss Limit Check
+            if pf.ch_daily_loss_limit > 0:
+                if np.any(-pnl >= pf.ch_daily_loss_limit):
+                    equity -= pf.ch_daily_loss_limit
+                    daily_pnls.append(-pf.ch_daily_loss_limit)
+                    trading_days += 1
+                    continue
+
+            # 3. Drawdown Checks (Safe from post-cap phantom trades)
             if pf.ch_drawdown_type == "trailing_intraday":
                 intraday_peaks: np.ndarray = np.maximum.accumulate(intraday_equity)
                 intraday_hwm: np.ndarray = np.maximum(high_water_mark, intraday_peaks)
@@ -189,25 +200,24 @@ class PropFirmSimulator:
             else:
                 raise ValueError(f"Invalid drawdown type: {pf.ch_drawdown_type}")
 
-            # 3. Daily Loss Limit Check
-            if pf.ch_daily_loss_limit > 0:
-                if np.any(equity - intraday_equity >= pf.ch_daily_loss_limit):
-                    equity -= pf.ch_daily_loss_limit
-                    daily_pnls.append(-pf.ch_daily_loss_limit)
-                    trading_days += 1
-                    continue
-
             # 4. Check for Passing (Target + Consistency)
             # Find all points where equity clears the stated target
-            pass_indices = np.flatnonzero(intraday_equity >= upper_barrier)
-            
-            if len(pass_indices) > 0:
-                for idx in pass_indices:
-                    # Test if consistency is valid at this specific intraday moment
-                    candidate_pnls = daily_pnls + [pnl[idx]]
-                    if (trading_days + 1) >= pf.ch_min_trading_days:
-                        if self._check_consistency(candidate_pnls):
-                            return trading_days + 1
+            # daily consistency, not trade consistency
+            pass_indices = intraday_equity >= upper_barrier
+
+            if np.any(pass_indices) and (trading_days + 1) >= pf.ch_min_trading_days:
+                if pf.ch_consistency_pct == 0:
+                    return trading_days + 1
+                
+                pass_pnls = pnl[pass_indices]
+                daily_pnls_array = np.array(daily_pnls)
+                positive_days = daily_pnls_array[daily_pnls_array > 0]
+                total_profit = np.sum(positive_days) + pass_pnls
+                max_profit = np.maximum(np.max(positive_days), np.max(pass_pnls))
+                consistency = max_profit / total_profit <= pf.ch_consistency_pct
+
+                if np.any(consistency):
+                    return trading_days + 1
 
             # 5. End of Day: Strategy survived without passing yet
             equity = intraday_equity[-1]
@@ -215,6 +225,12 @@ class PropFirmSimulator:
             trading_days += 1
 
         return None
+    
+    def _compute_optimal_sizing(self):
+        winrate = self.backtest.win_rate
+        RR = self.backtest.ratio_avg_win_loss
+        ev_rr = (winrate * RR) - (1 - winrate)
+        print(winrate, RR, ev_rr)
 
     def _simulate_funded(self):
         pass
@@ -231,6 +247,11 @@ class PropFirmSimulator:
             print(f"Median days to pass: {self.ch_median_days_to_pass:.1f}")
         print(f"Avg trades/day:     {self.avg_trades_per_day:.2f}")
         print(f"Trade pool size:    {len(self.trade_pool)}")
+        print(f"Avg attempts to pass: {self.ch_avg_attempts_to_pass:.2f}" if self.ch_avg_attempts_to_pass is not None else "Avg attempts to pass: N/A")
+        print(f"Expected cost to pass: ${self.ch_expected_cost_to_pass:.2f}" if self.ch_expected_cost_to_pass is not None else "Expected cost to pass: N/A")
+        print(f"Optimal sizing:     {self.optimal_sizing} contracts" if self.optimal_sizing is not None else "Optimal sizing: N/A")
+        print(f"Optimal sizing (micros): {self.optimal_sizing_micros} contracts" if self.optimal_sizing_micros is not None else "Optimal sizing (micros): N/A")
+
 
 
 # To update these terms in the future, visit the respective Prop Firm Match links below.
