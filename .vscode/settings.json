@@ -84,5 +84,6 @@
       "name": "AWS_SECRET_ACCESS_KEY",
       "value": "cMJnXlpljbtfWJe615HjL18PWH9Fhk76WvHbT+Fl"
     }
-  ]
+  ],
+  "prettier.printWidth": 300
 }
