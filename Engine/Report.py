@@ -755,6 +755,14 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
                 <span class="stat-label">Max Consec Losses</span>
                 <span class="stat-value">{bt.max_consec_losses}</span>
             </div>
+            <div class="stat-row">
+                <span class="stat-label">Skewness</span>
+                <span class="stat-value">{bt.skewness:.3f}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-label">Kurtosis</span>
+                <span class="stat-value">{bt.kurtosis:.3f}</span>
+            </div>
         </div>
 
         <div class="stat-section">
@@ -840,6 +848,17 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             'time_limit_days': pf.ch_time_limit_days,
             'min_trading_days': pf.ch_min_trading_days,
             'challenge_cost': pf.ch_cost,
+            'fu_activation_fee': pf.fu_activation_fee,
+            'fu_max_loss': pf.fu_max_loss,
+            'fu_daily_loss': pf.fu_daily_loss,
+            'fu_consistency_pct': pf.fu_consistency_pct,
+            'fu_max_contracts_mini': pf.fu_max_contracts_mini,
+            'fu_max_contracts_micro': pf.fu_max_contracts_micro,
+            'fu_min_profit_days': pf.fu_min_profit_days,
+            'fu_min_profit_per_day': pf.fu_min_profit_per_day,
+            'fu_days_to_payout': pf.fu_days_to_payout,
+            'fu_payout_split': pf.fu_payout_split,
+            'fu_payout_min_balance': pf.fu_payout_min_balance,
             'pass_rate': sim.ch_pass_rate or 0,
             'avg_attempts': sim.ch_avg_attempts_to_pass,
             'avg_days': sim.ch_avg_days_to_pass,
@@ -901,8 +920,9 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         function update() {{
             var d = DATA[parseInt(select.value)];
 
-            // Rules
+            // Rules — Challenge Phase
             var h = '<div class="prop-rules-list">';
+            h += '<div class="prop-rules-header">Challenge Phase</div>';
             h += '<div class="prop-rule-row"><span class="prop-rule-label">Initial Equity</span><span class="prop-rule-value">$' + d.initial_equity.toLocaleString() + '</span></div>';
             h += '<div class="prop-rule-row prop-rule-highlight"><span class="prop-rule-label">Profit Target</span><span class="prop-rule-value positive">$' + d.profit_target.toLocaleString() + '</span></div>';
             h += '<div class="prop-rule-row prop-rule-highlight"><span class="prop-rule-label">Max Loss</span><span class="prop-rule-value negative">$' + d.max_loss.toLocaleString() + '</span></div>';
@@ -913,6 +933,18 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             h += '<div class="prop-rule-row"><span class="prop-rule-label">Time Limit</span><span class="prop-rule-value">' + d.time_limit_days + ' days</span></div>';
             h += '<div class="prop-rule-row"><span class="prop-rule-label">Min Trading Days</span><span class="prop-rule-value">' + d.min_trading_days + '</span></div>';
             h += '<div class="prop-rule-row"><span class="prop-rule-label">Challenge Cost</span><span class="prop-rule-value">$' + d.challenge_cost.toFixed(2) + '</span></div>';
+            // Funded Phase
+            h += '<div class="prop-rules-header" style="margin-top:12px">Funded Phase</div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Activation Fee</span><span class="prop-rule-value">$' + d.fu_activation_fee.toLocaleString() + '</span></div>';
+            h += '<div class="prop-rule-row prop-rule-highlight"><span class="prop-rule-label">Max Loss</span><span class="prop-rule-value negative">$' + d.fu_max_loss.toLocaleString() + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Daily Loss Limit</span><span class="prop-rule-value">' + (d.fu_daily_loss > 0 ? '$' + d.fu_daily_loss.toLocaleString() : '\\u2014') + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Consistency</span><span class="prop-rule-value">' + (d.fu_consistency_pct > 0 ? (d.fu_consistency_pct * 100).toFixed(0) + '%' : '\\u2014') + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Contracts</span><span class="prop-rule-value">' + d.fu_max_contracts_mini + ' mini / ' + d.fu_max_contracts_micro + ' micro</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Min Profit Days</span><span class="prop-rule-value">' + d.fu_min_profit_days + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Min Profit/Day</span><span class="prop-rule-value">' + (d.fu_min_profit_per_day > 0 ? '$' + d.fu_min_profit_per_day.toLocaleString() : '\\u2014') + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Days to Payout</span><span class="prop-rule-value">' + d.fu_days_to_payout + '</span></div>';
+            h += '<div class="prop-rule-row prop-rule-highlight"><span class="prop-rule-label">Payout Split</span><span class="prop-rule-value positive">' + (d.fu_payout_split * 100).toFixed(0) + '%</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Min Balance for Payout</span><span class="prop-rule-value">$' + d.fu_payout_min_balance.toLocaleString() + '</span></div>';
             h += '</div>';
             rulesDiv.innerHTML = h;
 
@@ -1618,6 +1650,17 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             border-radius: 10px;
             font-size: 11px;
             letter-spacing: 0.5px;
+        }}
+
+        .prop-rules-header {{
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #666;
+            padding: 6px 10px 4px;
+            border-bottom: 1px solid #2a2a2a;
+            margin-bottom: 2px;
         }}
 
         .prop-cell-stats {{

@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from math import sqrt
 import matplotlib.dates as mdates
+from scipy.stats import skew, kurtosis
+
 
 from Engine.DataTimeseries import DataTimeseries
 from Engine.EquityCurve import EquityCurve
@@ -99,6 +101,8 @@ class Backtester:
         self.max_consec_losses: int = None
         self.largest_win: float = None
         self.largest_loss: float = None
+        self.skewness: float = None
+        self.kurtosis: float = None
         self.expected_value: float = None
 
         # Long trade metrics
@@ -297,6 +301,13 @@ class Backtester:
             self.largest_loss = losing_trades.min()
         else:
             self.largest_loss = np.nan
+
+        if self.total_trades > 2:
+            self.skewness = skew(trade_returns)
+            self.kurtosis = kurtosis(trade_returns)
+        else:
+            self.skewness = np.nan
+            self.kurtosis = np.nan
 
         # average loss stored as negative
         if np.isnan(self.win_rate) or np.isnan(self.average_win) or np.isnan(self.average_loss):
