@@ -20,7 +20,9 @@ class PropFirm:
         # Funded params
         fu_activation_fee,
         fu_max_loss,
-        fu_daily_loss,
+        fu_daily_loss_limit,
+        fu_drawdown_type,        # 'eod' or 'trailing_intraday'
+        fu_drawdown_lock_level,
         fu_consistency_pct,
         fu_max_contracts_mini,
         fu_max_contracts_micro,
@@ -29,6 +31,8 @@ class PropFirm:
         fu_days_to_payout,
         fu_payout_split,
         fu_payout_min_balance,
+        fu_payout_buffer,
+        fu_payout_cap,
     ):
         self.name = name
 
@@ -48,7 +52,9 @@ class PropFirm:
         # Funded
         self.fu_activation_fee = fu_activation_fee
         self.fu_max_loss = fu_max_loss
-        self.fu_daily_loss = fu_daily_loss
+        self.fu_daily_loss_limit = fu_daily_loss_limit
+        self.fu_drawdown_type = fu_drawdown_type
+        self.fu_drawdown_lock_level = fu_drawdown_lock_level
         self.fu_consistency_pct = fu_consistency_pct
         self.fu_max_contracts_mini = fu_max_contracts_mini
         self.fu_max_contracts_micro = fu_max_contracts_micro
@@ -57,6 +63,8 @@ class PropFirm:
         self.fu_days_to_payout = fu_days_to_payout
         self.fu_payout_split = fu_payout_split
         self.fu_payout_min_balance = fu_payout_min_balance
+        self.fu_payout_buffer = fu_payout_buffer
+        self.fu_payout_cap = fu_payout_cap
 
 
 class PropFirmSimulator:
@@ -256,7 +264,7 @@ class PropFirmSimulator:
 # Parameter order:
 # 1.  name                   # 12. fu_activation_fee
 # 2.  ch_initial_equity      # 13. fu_max_loss
-# 3.  ch_profit_target       # 14. fu_daily_loss
+# 3.  ch_profit_target       # 14. fu_daily_loss_limit
 # 4.  ch_max_loss            # 15. fu_consistency_pct
 # 5.  ch_daily_loss_limit    # 16. fu_max_contracts_mini
 # 6.  ch_drawdown_type       # 17. fu_max_contracts_micro
@@ -277,7 +285,7 @@ prop_firms = [
     # PropFirm("Lucid 25K Flex",      25000,  1250,  1000,     0, "eod",   0.50,    2,   20,     30,       2,    50.00,     149,    1000,      0,    0.00,     2,    20,      5,    150,       14,    0.90,   26100),
     # PropFirm("Lucid 25K Pro",       25000,  1250,  1000,   500, "eod",   0.00,    2,   20,     30,       1,    67.50,     149,    1000,    500,    0.40,     2,    20,      3,    150,       14,    0.90,   26100),
     
-    PropFirm("Lucid 50K Flex",      50000,  3000,  2000,     0, "eod",   0.50,    4,   40,     30,       2,    70.00,     149,    2000,      0,    0.00,     4,   40,       5,    150,       14,    0.90,   52100),
+    PropFirm("Lucid 50K Flex",      50000,  3000,  2000,     0, "eod",   0.50,    4,   40,     30,       2,    70.00,     149,    2000,      0, "eod",      0,    0.00,     4,   40,       5,    150,       14,    0.90,   52100,      0,       0),
     # PropFirm("Lucid 50K Pro",       50000,  3000,  2000,  1100, "eod",   0.00,    4,   40,     30,       1,    92.50,     149,    2000,   1100,    0.40,     4,   40,       3,    150,       14,    0.90,   52100),
     
     # PropFirm("Lucid 100K Flex",    100000,  6000,  3000,     0, "eod",   0.50,    6,   60,     30,       2,   112.50,     149,    3000,      0,    0.00,     6,   60,       5,    150,       14,    0.90,  103100),

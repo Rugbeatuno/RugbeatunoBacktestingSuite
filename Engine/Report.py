@@ -850,7 +850,9 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             'challenge_cost': pf.ch_cost,
             'fu_activation_fee': pf.fu_activation_fee,
             'fu_max_loss': pf.fu_max_loss,
-            'fu_daily_loss': pf.fu_daily_loss,
+            'fu_daily_loss_limit': pf.fu_daily_loss_limit,
+            'fu_drawdown_type': pf.fu_drawdown_type,
+            'fu_drawdown_lock_level': pf.fu_drawdown_lock_level,
             'fu_consistency_pct': pf.fu_consistency_pct,
             'fu_max_contracts_mini': pf.fu_max_contracts_mini,
             'fu_max_contracts_micro': pf.fu_max_contracts_micro,
@@ -859,6 +861,8 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             'fu_days_to_payout': pf.fu_days_to_payout,
             'fu_payout_split': pf.fu_payout_split,
             'fu_payout_min_balance': pf.fu_payout_min_balance,
+            'fu_payout_buffer': pf.fu_payout_buffer,
+            'fu_payout_cap': pf.fu_payout_cap,
             'pass_rate': sim.ch_pass_rate or 0,
             'avg_attempts': sim.ch_avg_attempts_to_pass,
             'avg_days': sim.ch_avg_days_to_pass,
@@ -881,11 +885,11 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
                     <select id="prop-firm-select"></select>
                     <div id="prop-rules-content"></div>
                 </div>
+                <div class="prop-cell prop-cell-desc" id="prop-desc-cell"></div>
+                <div class="prop-cell prop-cell-stats" id="prop-stats-cell"></div>
                 <div class="prop-cell prop-cell-chart">
                     <div class="prop-placeholder">Equity Paths — Coming Soon</div>
                 </div>
-                <div class="prop-cell prop-cell-stats" id="prop-stats-cell"></div>
-                <div class="prop-cell prop-cell-empty"><div class="prop-placeholder">—</div></div>
                 <div class="prop-cell prop-cell-empty"><div class="prop-placeholder">—</div></div>
                 <div class="prop-cell prop-cell-empty"><div class="prop-placeholder">—</div></div>
             </div>
@@ -919,6 +923,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
 
         function update() {{
             var d = DATA[parseInt(select.value)];
+            var descCell = document.getElementById('prop-desc-cell');
 
             // Rules — Challenge Phase
             var h = '<div class="prop-rules-list">';
@@ -937,16 +942,78 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             h += '<div class="prop-rules-header" style="margin-top:12px">Funded Phase</div>';
             h += '<div class="prop-rule-row"><span class="prop-rule-label">Activation Fee</span><span class="prop-rule-value">$' + d.fu_activation_fee.toLocaleString() + '</span></div>';
             h += '<div class="prop-rule-row prop-rule-highlight"><span class="prop-rule-label">Max Loss</span><span class="prop-rule-value negative">$' + d.fu_max_loss.toLocaleString() + '</span></div>';
-            h += '<div class="prop-rule-row"><span class="prop-rule-label">Daily Loss Limit</span><span class="prop-rule-value">' + (d.fu_daily_loss > 0 ? '$' + d.fu_daily_loss.toLocaleString() : '\\u2014') + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Daily Loss Limit</span><span class="prop-rule-value">' + (d.fu_daily_loss_limit > 0 ? '$' + d.fu_daily_loss_limit.toLocaleString() : '\\u2014') + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Drawdown Type</span><span class="prop-rule-value prop-rule-tag">' + d.fu_drawdown_type.replace('_', ' ').replace(/\\b\\w/g, function(c){{return c.toUpperCase();}}) + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Drawdown Lock</span><span class="prop-rule-value">' + (d.fu_drawdown_lock_level > 0 ? '$' + d.fu_drawdown_lock_level.toLocaleString() : '\\u2014') + '</span></div>';
             h += '<div class="prop-rule-row"><span class="prop-rule-label">Consistency</span><span class="prop-rule-value">' + (d.fu_consistency_pct > 0 ? (d.fu_consistency_pct * 100).toFixed(0) + '%' : '\\u2014') + '</span></div>';
             h += '<div class="prop-rule-row"><span class="prop-rule-label">Contracts</span><span class="prop-rule-value">' + d.fu_max_contracts_mini + ' mini / ' + d.fu_max_contracts_micro + ' micro</span></div>';
             h += '<div class="prop-rule-row"><span class="prop-rule-label">Min Profit Days</span><span class="prop-rule-value">' + d.fu_min_profit_days + '</span></div>';
             h += '<div class="prop-rule-row"><span class="prop-rule-label">Min Profit/Day</span><span class="prop-rule-value">' + (d.fu_min_profit_per_day > 0 ? '$' + d.fu_min_profit_per_day.toLocaleString() : '\\u2014') + '</span></div>';
             h += '<div class="prop-rule-row"><span class="prop-rule-label">Days to Payout</span><span class="prop-rule-value">' + d.fu_days_to_payout + '</span></div>';
-            h += '<div class="prop-rule-row prop-rule-highlight"><span class="prop-rule-label">Payout Split</span><span class="prop-rule-value positive">' + (d.fu_payout_split * 100).toFixed(0) + '%</span></div>';
+            h += '<div class="prop-rule-row prop-rule-highlight"><span class="prop-rule-label">Payout Split</span><span class="prop-rule-value positive">' + (d.fu_payout_split * 100).toFixed(0) + '/' + ((1 - d.fu_payout_split) * 100).toFixed(0) + '</span></div>';
             h += '<div class="prop-rule-row"><span class="prop-rule-label">Min Balance for Payout</span><span class="prop-rule-value">$' + d.fu_payout_min_balance.toLocaleString() + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Payout Buffer</span><span class="prop-rule-value">' + (d.fu_payout_buffer > 0 ? '$' + d.fu_payout_buffer.toLocaleString() : '\\u2014') + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Payout Cap</span><span class="prop-rule-value">' + (d.fu_payout_cap > 0 ? '$' + d.fu_payout_cap.toLocaleString() : 'Unlimited') + '</span></div>';
             h += '</div>';
             rulesDiv.innerHTML = h;
+
+            // Description cell — plain-English overview
+            var desc = '<div class="prop-desc-content">';
+            desc += '<div class="prop-desc-title">' + d.name + '</div>';
+            // Challenge description
+            desc += '<div class="prop-desc-header">Challenge</div>';
+            desc += '<p>Start with a $' + d.initial_equity.toLocaleString() + ' simulated account and reach a profit target of $' + d.profit_target.toLocaleString() + ' within ' + d.time_limit_days + ' days. ';
+            desc += 'The max trailing drawdown is $' + d.max_loss.toLocaleString() + ' (' + d.drawdown_type + '). ';
+            if (d.daily_loss_limit > 0) {{
+                desc += 'A daily loss limit of $' + d.daily_loss_limit.toLocaleString() + ' applies. ';
+            }} else {{
+                desc += 'No daily loss limit. ';
+            }}
+            if (d.consistency_pct > 0) {{
+                desc += 'A ' + (d.consistency_pct * 100).toFixed(0) + '% consistency rule caps any single day at ' + (d.consistency_pct * 100).toFixed(0) + '% of total profits. ';
+            }} else {{
+                desc += 'No consistency rule — you can pass in a single day. ';
+            }}
+            desc += 'You must trade at least ' + d.min_trading_days + ' day' + (d.min_trading_days > 1 ? 's' : '') + '. ';
+            desc += 'Position limit: ' + d.max_contracts_mini + ' mini / ' + d.max_contracts_micro + ' micro contracts. ';
+            desc += 'Challenge fee: $' + d.challenge_cost.toFixed(2) + '.</p>';
+            // Funded description
+            desc += '<div class="prop-desc-header">Funded Account</div>';
+            desc += '<p>Once funded, pay a $' + d.fu_activation_fee.toLocaleString() + ' activation fee. ';
+            desc += 'The trailing drawdown remains $' + d.fu_max_loss.toLocaleString() + ' (' + d.fu_drawdown_type.replace('_', ' ') + '). ';
+            if (d.fu_drawdown_lock_level > 0) {{
+                desc += 'Drawdown locks at $' + d.fu_drawdown_lock_level.toLocaleString() + ' (stops trailing once account hits this profit above start). ';
+            }}
+            if (d.fu_daily_loss_limit > 0) {{
+                desc += 'Daily loss limit: $' + d.fu_daily_loss_limit.toLocaleString() + '. ';
+            }} else {{
+                desc += 'No daily loss limit. ';
+            }}
+            if (d.fu_consistency_pct > 0) {{
+                desc += 'A ' + (d.fu_consistency_pct * 100).toFixed(0) + '% consistency rule applies to payouts. ';
+            }} else {{
+                desc += 'No consistency rule. ';
+            }}
+            desc += 'Position limit: ' + d.fu_max_contracts_mini + ' mini / ' + d.fu_max_contracts_micro + ' micro. ';
+            desc += 'Profit split is ' + (d.fu_payout_split * 100).toFixed(0) + '/' + ((1 - d.fu_payout_split) * 100).toFixed(0) + ' (trader/firm). ';
+            desc += 'First payout after ' + d.fu_days_to_payout + ' days with ' + d.fu_min_profit_days + ' profitable day' + (d.fu_min_profit_days > 1 ? 's' : '') + '';
+            if (d.fu_min_profit_per_day > 0) {{
+                desc += ' (min $' + d.fu_min_profit_per_day.toLocaleString() + '/day)';
+            }}
+            desc += '. ';
+            desc += 'Minimum balance of $' + d.fu_payout_min_balance.toLocaleString() + ' required to request payout. ';
+            if (d.fu_payout_buffer > 0) {{
+                desc += 'A $' + d.fu_payout_buffer.toLocaleString() + ' buffer is reserved from withdrawable profits. ';
+            }} else {{
+                desc += 'No payout buffer. ';
+            }}
+            if (d.fu_payout_cap > 0) {{
+                desc += 'Max payout capped at $' + d.fu_payout_cap.toLocaleString() + ' per withdrawal.</p>';
+            }} else {{
+                desc += 'No payout cap.</p>';
+            }}
+            desc += '</div>';
+            descCell.innerHTML = desc;
 
             // Stats — 6 mini boxes
             var pc = passColor(d.pass_rate);
@@ -1710,6 +1777,39 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         .prop-mini-sub {{
             font-size: 10px;
             color: #666;
+        }}
+
+        .prop-cell-desc {{
+            overflow-y: auto;
+        }}
+
+        .prop-desc-content {{
+            font-size: 13px;
+            line-height: 1.6;
+            color: #ccc;
+        }}
+
+        .prop-desc-title {{
+            font-size: 16px;
+            font-weight: 700;
+            color: #e0e0e0;
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #2a2a2a;
+        }}
+
+        .prop-desc-header {{
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #2196F3;
+            margin: 12px 0 6px;
+        }}
+
+        .prop-desc-content p {{
+            margin: 0 0 10px;
+            color: #aaa;
         }}
 
         .prop-cell-empty, .prop-cell-chart {{
