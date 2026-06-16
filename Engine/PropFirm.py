@@ -157,69 +157,64 @@ class PropFirmSimulator:
         daily_pnls = []
         trading_days = 0
 
-        # Pre-calculate barriers
         upper_barrier = pf.ch_initial_equity + pf.ch_profit_target
         lower_barrier = pf.ch_initial_equity - pf.ch_max_loss
         daily_profit_cap = pf.ch_profit_target * pf.ch_consistency_pct if pf.ch_consistency_pct > 0 else pf.ch_profit_target
 
-        for day in range(pf.ch_time_limit_days):
-            trades: np.ndarray = self._sample_day_trades()
-            pnl: np.ndarray = np.cumsum(trades)
-            
-            # 1. Apply Daily Profit Cap Circuit Breaker FIRST
-            if daily_profit_cap is not None:
-                cap_index = np.argmax(pnl >= daily_profit_cap)
-                if cap_index > 0:
-                    pnl = pnl[:cap_index + 1]
-                    pnl[-1] = daily_profit_cap 
+        n_trades_per_day = self.rng.poisson(self.avg_trades_per_day, size=pf.ch_time_limit_days)
+        n_trades_per_day = np.maximum(n_trades_per_day, 1)
+        total_trades = np.sum(n_trades_per_day)
+        random_indices = self.rng.integers(0, len(self.trade_pool), size=total_trades)
+        all_trades = self.trade_pool[random_indices]
+        index = 0
 
+        for day in range(pf.ch_time_limit_days):
+            trades = all_trades[index: index + n_trades_per_day[day]]
+            index += n_trades_per_day[day]
+
+            pnl: np.ndarray = np.cumsum(trades)
+
+            if daily_profit_cap is not None:
+                if np.max(pnl) >= daily_profit_cap:
+                    pnl = pnl[:np.argmax(pnl >= daily_profit_cap) + 1]
+                    pnl[-1] = daily_profit_cap
             intraday_equity: np.ndarray = equity + pnl
 
-            # 2. Daily Loss Limit Check
             if pf.ch_daily_loss_limit > 0:
-                if np.any(-pnl >= pf.ch_daily_loss_limit):
+                if np.max(-pnl) >= pf.ch_daily_loss_limit:
                     equity -= pf.ch_daily_loss_limit
                     daily_pnls.append(-pf.ch_daily_loss_limit)
                     trading_days += 1
                     continue
 
-            # 3. Drawdown Checks (Safe from post-cap phantom trades)
             if pf.ch_drawdown_type == "trailing_intraday":
                 intraday_peaks: np.ndarray = np.maximum.accumulate(intraday_equity)
                 intraday_hwm: np.ndarray = np.maximum(high_water_mark, intraday_peaks)
                 trailing_floor: np.ndarray = intraday_hwm - pf.ch_max_loss
-                if np.any(intraday_equity <= trailing_floor):
+                if np.min(intraday_equity) <= trailing_floor:
                     return None
                 high_water_mark = intraday_hwm[-1]
-
             elif pf.ch_drawdown_type == "eod":
-                if np.any(intraday_equity <= lower_barrier):
+                if np.min(intraday_equity) <= lower_barrier:
                     return None
                 lower_barrier = max(lower_barrier, intraday_equity[-1] - pf.ch_max_loss)
-                
             else:
                 raise ValueError(f"Invalid drawdown type: {pf.ch_drawdown_type}")
 
-            # 4. Check for Passing (Target + Consistency)
-            # Find all points where equity clears the stated target
-            # daily consistency, not trade consistency
-            pass_indices = intraday_equity >= upper_barrier
-
-            if np.any(pass_indices) and (trading_days + 1) >= pf.ch_min_trading_days:
+            if (trading_days + 1) >= pf.ch_min_trading_days and np.max(intraday_equity) >= upper_barrier:
                 if pf.ch_consistency_pct == 0:
                     return trading_days + 1
-                
-                pass_pnls = pnl[pass_indices]
+
+                pass_pnls = pnl[intraday_equity >= upper_barrier]
                 daily_pnls_array = np.array(daily_pnls)
                 positive_days = daily_pnls_array[daily_pnls_array > 0]
                 total_profit = np.sum(positive_days) + pass_pnls
-                max_profit = np.maximum(np.max(positive_days), np.max(pass_pnls))
-                consistency = max_profit / total_profit <= pf.ch_consistency_pct
+                max_pos = np.max(positive_days) if positive_days.size > 0 else 0
+                max_profit = np.maximum(max_pos, pass_pnls)
 
-                if np.any(consistency):
+                if np.min(max_profit / total_profit) <= pf.ch_consistency_pct:
                     return trading_days + 1
 
-            # 5. End of Day: Strategy survived without passing yet
             equity = intraday_equity[-1]
             daily_pnls.append(pnl[-1])
             trading_days += 1
@@ -230,7 +225,7 @@ class PropFirmSimulator:
         winrate = self.backtest.win_rate
         RR = self.backtest.ratio_avg_win_loss
         ev_rr = (winrate * RR) - (1 - winrate)
-        print(winrate, RR, ev_rr)
+        # print(winrate, RR, ev_rr)
 
     def _simulate_funded(self):
         pass

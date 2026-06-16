@@ -501,24 +501,14 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         ))
         i = j
 
-    # Equity curve on bottom panel — green when increasing, red when decreasing
-    eq_colors = np.where(
-        np.diff(tv_equity, prepend=tv_equity[0]) >= 0, '#4CAF50', '#f44336')
-    i_seg = 0
-    while i_seg < n_total:
-        c = eq_colors[i_seg]
-        j_seg = i_seg
-        while j_seg < n_total and eq_colors[j_seg] == c:
-            j_seg += 1
-        sl = slice(max(0, i_seg - 1), min(j_seg + 1, n_total))
-        fig_trades.add_trace(go.Scatter(
-            x=tv_x[sl], y=tv_equity[sl],
-            customdata=[tv_date_strs[k] for k in range(sl.start, sl.stop)],
-            line=dict(color=c, width=1.5),
-            showlegend=False,
-            hovertemplate='%{customdata}<br>Equity: $%{y:,.2f}<extra></extra>',
-        ), row=2, col=1)
-        i_seg = j_seg
+    # Equity curve on bottom panel
+    fig_trades.add_trace(go.Scatter(
+        x=tv_x, y=tv_equity,
+        customdata=tv_date_strs,
+        line=dict(color='#2196F3', width=1.5),
+        showlegend=False,
+        hovertemplate='%{customdata}<br>Equity: $%{y:,.2f}<extra></extra>',
+    ), row=2, col=1)
 
     fig_trades.update_layout(
         margin=dict(l=50, r=20, t=30, b=30),
@@ -823,6 +813,126 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             </div>
         </div>
     </div>
+    '''
+
+    # --- Prop Firm Analysis Section ---
+    import json
+    from Engine.PropFirm import PropFirmSimulator, prop_firms
+
+    RR = bt.ratio_avg_win_loss if bt.ratio_avg_win_loss else 0
+    ev_per_trade_rr = (bt.win_rate * RR) - (1 - bt.win_rate) if RR else 0
+
+    prop_data_list = []
+    for pf in prop_firms:
+        sim = PropFirmSimulator(bt, pf)
+        sim.run()
+        avg_trades_to_pass = (sim.ch_avg_days_to_pass or 0) * sim.avg_trades_per_day
+        prop_data_list.append({
+            'name': pf.name,
+            'initial_equity': pf.ch_initial_equity,
+            'profit_target': pf.ch_profit_target,
+            'max_loss': pf.ch_max_loss,
+            'daily_loss_limit': pf.ch_daily_loss_limit,
+            'drawdown_type': pf.ch_drawdown_type.replace('_', ' ').title(),
+            'consistency_pct': pf.ch_consistency_pct,
+            'max_contracts_mini': pf.ch_max_contracts_mini,
+            'max_contracts_micro': pf.ch_max_contracts_micro,
+            'time_limit_days': pf.ch_time_limit_days,
+            'min_trading_days': pf.ch_min_trading_days,
+            'challenge_cost': pf.ch_cost,
+            'pass_rate': sim.ch_pass_rate or 0,
+            'avg_attempts': sim.ch_avg_attempts_to_pass,
+            'avg_days': sim.ch_avg_days_to_pass,
+            'median_days': sim.ch_median_days_to_pass,
+            'expected_cost': sim.ch_expected_cost_to_pass,
+            'avg_trades_per_day': sim.avg_trades_per_day,
+            'avg_trades_to_pass': avg_trades_to_pass,
+            'ev_per_trade_rr': ev_per_trade_rr,
+            'num_sims': sim.num_simulations,
+        })
+
+    prop_data_json = json.dumps(prop_data_list)
+
+    prop_firm_html = f'''
+    <div class="prop-firm-section">
+        <div class="panel" style="padding: 20px;">
+            <div class="panel-title">Prop Firm Challenge Analysis</div>
+            <div class="prop-firm-grid">
+                <div class="prop-cell prop-cell-rules">
+                    <select id="prop-firm-select"></select>
+                    <div id="prop-rules-content"></div>
+                </div>
+                <div class="prop-cell prop-cell-chart">
+                    <div class="prop-placeholder">Equity Paths — Coming Soon</div>
+                </div>
+                <div class="prop-cell prop-cell-stats" id="prop-stats-cell"></div>
+                <div class="prop-cell prop-cell-empty"><div class="prop-placeholder">—</div></div>
+                <div class="prop-cell prop-cell-empty"><div class="prop-placeholder">—</div></div>
+                <div class="prop-cell prop-cell-empty"><div class="prop-placeholder">—</div></div>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function() {{
+        const DATA = {prop_data_json};
+        const select = document.getElementById('prop-firm-select');
+        const rulesDiv = document.getElementById('prop-rules-content');
+        const statsCell = document.getElementById('prop-stats-cell');
+
+        DATA.forEach(function(d, i) {{
+            var opt = document.createElement('option');
+            opt.value = i;
+            opt.textContent = d.name;
+            select.appendChild(opt);
+        }});
+
+        function fmt(v) {{
+            if (v === null || v === undefined) return 'N/A';
+            return v.toLocaleString(undefined, {{minimumFractionDigits: 1, maximumFractionDigits: 1}});
+        }}
+        function fmtDollar(v) {{
+            if (v === null || v === undefined) return 'N/A';
+            return '$' + v.toLocaleString(undefined, {{minimumFractionDigits: 2, maximumFractionDigits: 2}});
+        }}
+        function passColor(rate) {{
+            return rate >= 0.5 ? '#4CAF50' : rate >= 0.2 ? '#FF9800' : '#f44336';
+        }}
+
+        function update() {{
+            var d = DATA[parseInt(select.value)];
+
+            // Rules
+            var h = '<div class="prop-rules-list">';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Initial Equity</span><span class="prop-rule-value">$' + d.initial_equity.toLocaleString() + '</span></div>';
+            h += '<div class="prop-rule-row prop-rule-highlight"><span class="prop-rule-label">Profit Target</span><span class="prop-rule-value positive">$' + d.profit_target.toLocaleString() + '</span></div>';
+            h += '<div class="prop-rule-row prop-rule-highlight"><span class="prop-rule-label">Max Loss</span><span class="prop-rule-value negative">$' + d.max_loss.toLocaleString() + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Daily Loss Limit</span><span class="prop-rule-value">' + (d.daily_loss_limit > 0 ? '$' + d.daily_loss_limit.toLocaleString() : '\\u2014') + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Drawdown Type</span><span class="prop-rule-value prop-rule-tag">' + d.drawdown_type + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Consistency</span><span class="prop-rule-value">' + (d.consistency_pct > 0 ? (d.consistency_pct * 100).toFixed(0) + '%' : '\\u2014') + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Contracts</span><span class="prop-rule-value">' + d.max_contracts_mini + ' mini / ' + d.max_contracts_micro + ' micro</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Time Limit</span><span class="prop-rule-value">' + d.time_limit_days + ' days</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Min Trading Days</span><span class="prop-rule-value">' + d.min_trading_days + '</span></div>';
+            h += '<div class="prop-rule-row"><span class="prop-rule-label">Challenge Cost</span><span class="prop-rule-value">$' + d.challenge_cost.toFixed(2) + '</span></div>';
+            h += '</div>';
+            rulesDiv.innerHTML = h;
+
+            // Stats — 6 mini boxes
+            var pc = passColor(d.pass_rate);
+            var s = '<div class="prop-stats-grid">';
+            s += '<div class="prop-mini-box" style="border-left:3px solid ' + pc + '"><div class="prop-mini-value" style="color:' + pc + '">' + (d.pass_rate * 100).toFixed(2) + '%</div><div class="prop-mini-label">Pass Rate</div><div class="prop-mini-sub">' + d.num_sims.toLocaleString() + ' simulations</div></div>';
+            s += '<div class="prop-mini-box" style="border-left:3px solid #2196F3"><div class="prop-mini-value" style="color:#2196F3">' + fmt(d.avg_attempts) + '</div><div class="prop-mini-label">Avg Attempts</div><div class="prop-mini-sub">challenges to pass</div></div>';
+            s += '<div class="prop-mini-box" style="border-left:3px solid #9C27B0"><div class="prop-mini-value" style="color:#9C27B0">' + fmt(d.avg_days) + ' <span class="prop-mini-sep">/</span> ' + fmt(d.median_days) + '</div><div class="prop-mini-label">Avg / Median Days</div><div class="prop-mini-sub">to pass evaluation</div></div>';
+            s += '<div class="prop-mini-box" style="border-left:3px solid #f44336"><div class="prop-mini-value" style="color:#f44336">' + fmtDollar(d.expected_cost) + '</div><div class="prop-mini-label">Expected Cost</div><div class="prop-mini-sub">to get funded</div></div>';
+            s += '<div class="prop-mini-box" style="border-left:3px solid #FF9800"><div class="prop-mini-value" style="color:#FF9800">' + fmt(d.avg_trades_per_day) + ' <span class="prop-mini-sep">/</span> ' + fmt(d.avg_trades_to_pass) + '</div><div class="prop-mini-label">Trades/Day / To Pass</div><div class="prop-mini-sub">avg daily &amp; total to pass</div></div>';
+            s += '<div class="prop-mini-box" style="border-left:3px solid #4CAF50"><div class="prop-mini-value" style="color:#4CAF50">' + d.ev_per_trade_rr.toFixed(3) + 'R</div><div class="prop-mini-label">EV per Trade</div><div class="prop-mini-sub">expected R-multiple</div></div>';
+            s += '</div>';
+            statsCell.innerHTML = s;
+        }}
+
+        select.addEventListener('change', update);
+        update();
+    }})();
+    </script>
     '''
 
     # --- Assemble full HTML ---
@@ -1422,6 +1532,155 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             background: linear-gradient(to right, rgba(255,255,255,0.03), #f44336);
         }}
 
+        /* Prop Firm Analysis */
+        .prop-firm-section {{
+            margin-top: 12px;
+        }}
+
+        .prop-firm-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: 1fr 1fr;
+            gap: 12px;
+            height: 700px;
+        }}
+
+        .prop-cell {{
+            background: #111;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 16px;
+            overflow-y: auto;
+        }}
+
+        #prop-firm-select {{
+            width: 100%;
+            padding: 10px 12px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #e0e0e0;
+            background: #0d0d0d;
+            border: 1px solid #333;
+            border-radius: 6px;
+            margin-bottom: 14px;
+            cursor: pointer;
+            outline: none;
+            appearance: none;
+            -webkit-appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+        }}
+
+        #prop-firm-select:hover {{
+            border-color: #555;
+        }}
+
+        #prop-firm-select:focus {{
+            border-color: #2196F3;
+            box-shadow: 0 0 0 2px rgba(33, 150, 243, 0.15);
+        }}
+
+        .prop-rules-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }}
+
+        .prop-rule-row {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 7px 10px;
+            font-size: 13px;
+            border-radius: 4px;
+            transition: background 0.15s;
+        }}
+
+        .prop-rule-row:hover {{
+            background: #1a1a1a;
+        }}
+
+        .prop-rule-row.prop-rule-highlight {{
+            background: #1a1a1a;
+            border-left: 2px solid #555;
+            padding-left: 8px;
+        }}
+
+        .prop-rule-label {{ color: #999; }}
+        .prop-rule-value {{ color: #e0e0e0; font-weight: 500; font-variant-numeric: tabular-nums; }}
+        .prop-rule-value.positive {{ color: #4CAF50; font-weight: 600; }}
+        .prop-rule-value.negative {{ color: #f44336; font-weight: 600; }}
+
+        .prop-rule-tag {{
+            background: #2a2a2a;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }}
+
+        .prop-cell-stats {{
+            padding: 12px;
+        }}
+
+        .prop-stats-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: 1fr 1fr 1fr;
+            gap: 10px;
+            height: 100%;
+        }}
+
+        .prop-mini-box {{
+            background: #0d0d0d;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            padding: 14px 12px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }}
+
+        .prop-mini-value {{
+            font-size: 20px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            margin-bottom: 4px;
+        }}
+
+        .prop-mini-sep {{
+            font-size: 14px;
+            opacity: 0.5;
+            font-weight: 400;
+        }}
+
+        .prop-mini-label {{
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #bbb;
+            margin-bottom: 2px;
+        }}
+
+        .prop-mini-sub {{
+            font-size: 10px;
+            color: #666;
+        }}
+
+        .prop-cell-empty, .prop-cell-chart {{
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+
+        .prop-placeholder {{
+            color: #444;
+            font-size: 13px;
+            font-style: italic;
+        }}
+
         @media (max-width: 1000px) {{
             .top-row {{
                 grid-template-columns: 1fr;
@@ -1429,6 +1688,10 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             }}
             .top-row .chart-panel {{
                 height: 300px;
+            }}
+            .prop-firm-grid {{
+                grid-template-columns: 1fr;
+                height: auto;
             }}
         }}
     </style>
@@ -1507,6 +1770,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             </div>
         </div>
 
+
         <!-- Streak Probability Section -->
         <div class="panel streak-section" style="padding: 20px;">
             <div class="streak-header">
@@ -1534,7 +1798,11 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
             </div>
         </div>
 
+        {prop_firm_html}
+
+
     </div>
+
 
     <script>
         window.addEventListener('resize', function() {{
