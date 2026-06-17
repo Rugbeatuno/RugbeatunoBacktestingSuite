@@ -248,7 +248,7 @@ class Backtester:
 
         # 5. Build Trade Identifiers for Analytics
         # A trade block starts when moving from Flat (0) to holding a position
-        trade_starts = (self.current_position != 0) & (prev_position == 0)
+        trade_starts = (self.current_position != 0) & (prev_position != self.current_position)
         self.trade_indicies = trade_starts.astype(float)
         
         # Create an ID array: [0, 0, 1, 1, 1, 0, 0, 2, 2, 0]
