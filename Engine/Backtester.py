@@ -19,6 +19,7 @@ from Engine.Utils import dollar_format, percentage_format, number_format, confid
 # monte carlo permulation test
 # hyperparameter stationary testing
 
+# when multiple contracts scaling in and out https://gemini.google.com/share/4fc55a6c66db
 
 class Backtester:
 

@@ -283,3 +283,40 @@ def plot_candles_with_signal(df):
         title="Candles + EMA + Signal",
         volume=True,
     )
+
+def classify_vol_regime(close_prices, window=50, macro_window=500):
+    """
+    Takes a time series of close prices and classifies the market into 
+    three volatility regimes: 0 (Low), 1 (Moderate), and 2 (High).
+    
+    Parameters:
+    - close_prices: array-like or pd.Series of close prices.
+    - window: The lookback period for Realized Volatility.
+    - macro_window: The lookback period for calculating rolling percentiles.
+    
+    Returns:
+    - A numpy array of the same length containing 0, 1, 2 (or NaN for the burn-in period).
+    """
+    prices = pd.Series(close_prices)
+    
+    # 1. Calculate Log Returns
+    log_returns = np.log(prices / prices.shift(1))
+    
+    # 2. Calculate Rolling Realized Volatility
+    # Root sum of squares of log returns over the specified window
+    rv = np.sqrt((log_returns**2).rolling(window=window).sum())
+    
+    # 3. Calculate Dynamic Thresholds
+    # We use a rolling quantile to prevent lookahead bias in the backtest.
+    # min_periods=window allows classification to start as soon as the first RV value is generated.
+    p33 = rv.rolling(window=macro_window, min_periods=window).quantile(0.33)
+    p67 = rv.rolling(window=macro_window, min_periods=window).quantile(0.67)
+    
+    # 4. Classify Regimes (0: Low, 1: Moderate, 2: High)
+    regimes = pd.Series(np.nan, index=prices.index)
+    
+    regimes.loc[rv <= p33] = 0
+    regimes.loc[(rv > p33) & (rv <= p67)] = 1
+    regimes.loc[rv > p67] = 2
+    
+    return regimes.values

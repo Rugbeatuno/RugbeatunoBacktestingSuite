@@ -4,7 +4,7 @@ import plotly.graph_objects as go
 import webbrowser
 from pathlib import Path
 
-from Engine.Utils import confidence_interval, confidence_interval_mean
+from Engine.Utils import confidence_interval, confidence_interval_mean, classify_vol_regime
 
 
 def generate_report(bt, output_path: str = 'backtest_report.html', open_browser: bool = True):
@@ -59,6 +59,40 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
     end_str = bt.end_date.strftime('%Y-%m-%d')
     date_range_str = f'{start_str}  —  {end_str}'
 
+    # --- Volatility regime classification ---
+    regimes = classify_vol_regime(bt.close_prices)
+    VOL_REGIME_COLORS = {
+        0: 'rgba(76, 175, 80, 0.08)',   # low vol - green
+        1: 'rgba(255, 193, 7, 0.08)',    # med vol - yellow
+        2: 'rgba(244, 67, 54, 0.08)',    # high vol - red
+    }
+    VOL_REGIME_LEGEND = [
+        ('Low Volatility', 'rgba(76, 175, 80, 0.5)'),
+        ('Med Volatility', 'rgba(255, 193, 7, 0.5)'),
+        ('High Volatility', 'rgba(244, 67, 54, 0.5)'),
+    ]
+
+    def build_vol_regime_shapes(regime_arr, xref='x', yref='paper', x_offset=0):
+        shapes = []
+        i = 0
+        while i < len(regime_arr):
+            cur = regime_arr[i]
+            if np.isnan(cur):
+                i += 1
+                continue
+            j = i
+            while j < len(regime_arr) and regime_arr[j] == cur:
+                j += 1
+            shapes.append(dict(
+                type='rect', xref=xref, yref=yref,
+                x0=i + x_offset, x1=j - 1 + x_offset,
+                y0=0, y1=1,
+                fillcolor=VOL_REGIME_COLORS[int(cur)],
+                line_width=0, layer='below',
+            ))
+            i = j
+        return shapes
+
     # --- Build Plotly figures ---
 
     # 1. Main equity chart
@@ -76,6 +110,19 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         name='Buy & Hold', line=dict(color='#9E9E9E', width=1, dash='dot'),
         hovertemplate='Trade #%{x} | %{customdata}<br>B&H: $%{y:,.2f}<extra></extra>'
     ))
+
+    # Volatility regime background shading (trade-level)
+    regime_at_trade = regimes[boundaries]
+    vol_shapes = build_vol_regime_shapes(regime_at_trade, xref='x', yref='paper', x_offset=1)
+
+    # Legend entries for regime colors
+    for label, color in VOL_REGIME_LEGEND:
+        fig_equity.add_trace(go.Scatter(
+            x=[None], y=[None], mode='markers',
+            marker=dict(size=10, color=color, symbol='square'),
+            name=label, showlegend=True,
+        ))
+
     fig_equity.update_layout(
         margin=dict(l=50, r=20, t=30, b=30),
         legend=dict(x=0.5, y=1.15, xanchor='center', yanchor='top',
@@ -85,6 +132,7 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         yaxis=dict(showgrid=True, gridcolor='#2a2a2a', tickprefix='$'),
         paper_bgcolor='#1a1a1a', plot_bgcolor='#1a1a1a',
         font=dict(color='#e0e0e0'),
+        shapes=vol_shapes,
         annotations=[dict(
             text=date_range_str,
             xref='paper', yref='paper',
@@ -509,6 +557,9 @@ def generate_report(bt, output_path: str = 'backtest_report.html', open_browser:
         showlegend=False,
         hovertemplate='%{customdata}<br>Equity: $%{y:,.2f}<extra></extra>',
     ), row=2, col=1)
+
+    # Volatility regime background on equity subplot (row 2)
+    shapes.extend(build_vol_regime_shapes(regimes, xref='x2', yref='y2 domain'))
 
     fig_trades.update_layout(
         margin=dict(l=50, r=20, t=30, b=30),
