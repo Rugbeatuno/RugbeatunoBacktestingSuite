@@ -32,7 +32,8 @@ class Backtester:
             contract_multiplier: float,
             initial_equity: float = 100_000,
             slippage_ticks: float = 0,
-            commission: float = 0
+            commission: float = 0,
+            hold_overnight: bool = False
     ):
 
         assert len(ohlc) == len(
@@ -65,10 +66,9 @@ class Backtester:
 
         # Signal metrics
         self.signal: np.ndarray = signal
-        prev_signal = np.roll(self.signal, 1)
-        prev_signal[0] = 0.0
-        self.trade_indicies: np.ndarray = ((self.signal != 0) & (
-            self.signal != prev_signal)).astype(float)
+        self.current_position: np.ndarray = None 
+        self.trade_indicies: np.ndarray = None
+        self.trade_ids: np.ndarray = None
 
         # Return metrics
         self.candle_pnl: np.ndarray = None  # PnL of each candle
@@ -144,6 +144,9 @@ class Backtester:
         self.kelly_fraction: float = None
         self.kelly_payoff_ratio: float = None
         self.kelly_growth_rate: float = None
+
+        self.hold_overnight = hold_overnight
+
         self.backtest_ran = False
 
     def __str__(self):
@@ -197,34 +200,63 @@ class Backtester:
 
     def quick_backtest(self) -> None:
         if len(self.signal) != len(self.close_prices):
-            raise ValueError(
-                f"Signal length must match the length of close prices. {len(self.signal)} != {len(self.close_prices)}")
+            raise ValueError("Signal length must match close prices length.")
 
-        # Handle NaN values introduced by shift
-        position = np.roll(self.signal, 1)
-        position[0] = 0.0
-        close_to_close = np.diff(
-            self.close_prices, prepend=self.close_prices[0])
-        open_to_close = self.close_prices - self.ohlc[:, 0]
-        entered_this_bar = self.trade_indicies > 0
-        price_diff = np.where(entered_this_bar, open_to_close, close_to_close)
+        # 1. Shift positions to prevent look-ahead bias
+        # Signal at Close of T-1 becomes Position held during T
+        self.current_position = np.roll(self.signal, 1)
+        self.current_position[0] = 0.0
+        
+        prev_position = np.roll(self.current_position, 1)
+        prev_position[0] = 0.0
 
-        raw_pnl: np.ndarray = position * price_diff * self.contract_multiplier
+        # 2. Transaction Costs (Calculated by Delta Position)
+        # Accurately bills scaling in, scaling out, and reversing
+        contracts_traded = np.abs(self.current_position - prev_position)
+        
+        self.commission_costs = contracts_traded * self.commission
+        self.slippage_costs = contracts_traded * self.slippage_ticks * self.tick_value
+        self.transaction_costs = self.commission_costs + self.slippage_costs
 
-        self.commission_costs: np.ndarray = self.trade_indicies * self.commission
-        self.slippage_costs: np.ndarray = self.trade_indicies * self.slippage_ticks * \
-            self.tick_value
-        self.transaction_costs: np.ndarray = self.commission_costs + self.slippage_costs
+        # 3. Accurate Scaling PnL Calculation
+        open_prices = self.ohlc[:, 0]
+        close_prices = self.close_prices
+        
+        prev_close = np.roll(close_prices, 1)
+        prev_close[0] = open_prices[0] # Fallback for bar 0
+        
+        
+        # PnL on total new position from the Open to the Close
+        intraday_pnl = self.current_position * (close_prices - open_prices) * self.contract_multiplier
 
-        self.candle_pnl: np.ndarray = raw_pnl - self.transaction_costs
-        self.cum_candle_pnl: np.ndarray = self.candle_pnl.cumsum()
-        self.equity_curve: np.ndarray = self.initial_equity + self.cum_candle_pnl
+        # PnL on contracts held overnight into the Open or weekend gaps
+        if self.hold_overnight:
+            gap_pnl = prev_position * (open_prices - prev_close) * self.contract_multiplier
+            intraday_pnl += gap_pnl 
+
+        raw_pnl = intraday_pnl
+
+
+        # 4. Net Equity
+        self.candle_pnl = raw_pnl - self.transaction_costs
+        self.cum_candle_pnl = self.candle_pnl.cumsum()
+        self.equity_curve = self.initial_equity + self.cum_candle_pnl
 
         self.final_equity = self.equity_curve[-1]
         self.total_pnl = self.cum_candle_pnl[-1]
         self.total_pct_return = self.total_pnl / self.initial_equity
 
+        # 5. Build Trade Identifiers for Analytics
+        # A trade block starts when moving from Flat (0) to holding a position
+        trade_starts = (self.current_position != 0) & (prev_position == 0)
+        self.trade_indicies = trade_starts.astype(float)
+        
+        # Create an ID array: [0, 0, 1, 1, 1, 0, 0, 2, 2, 0]
+        in_market_mask = self.current_position != 0
+        self.trade_ids = np.cumsum(trade_starts) * in_market_mask
+
         self.backtest_ran = True
+    
 
     def calculate_raw_buy_hold_return(self) -> float:
         point_move = self.close_prices[-1] - self.close_prices[0]
