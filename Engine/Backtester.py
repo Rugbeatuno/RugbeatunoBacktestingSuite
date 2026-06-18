@@ -215,7 +215,7 @@ class Backtester:
         # Accurately bills scaling in, scaling out, and reversing
         contracts_traded = np.abs(self.current_position - prev_position)
         
-        self.commission_costs = contracts_traded * self.commission
+        self.commission_costs = contracts_traded * self.commission / 2  # commissions are round trip
         self.slippage_costs = contracts_traded * self.slippage_ticks * self.tick_value
         self.transaction_costs = self.commission_costs + self.slippage_costs
 

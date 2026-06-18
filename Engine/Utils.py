@@ -283,19 +283,20 @@ def plot_candles_with_signal(df):
         title="Candles + EMA + Signal",
         volume=True,
     )
-
-def classify_vol_regime(close_prices, window=50, macro_window=500):
+def classify_vol_regime(close_prices, window=100):
     """
     Takes a time series of close prices and classifies the market into 
     three volatility regimes: 0 (Low), 1 (Moderate), and 2 (High).
     
+    Uses global percentiles for perfect hindsight in backtest analysis.
+    
     Parameters:
     - close_prices: array-like or pd.Series of close prices.
     - window: The lookback period for Realized Volatility.
-    - macro_window: The lookback period for calculating rolling percentiles.
     
     Returns:
-    - A numpy array of the same length containing 0, 1, 2 (or NaN for the burn-in period).
+    - regimes: A numpy array of the same length containing 0, 1, 2 (or NaN).
+    - p33, p67: The global thresholds used (useful for plotting horizontal lines on your chart).
     """
     prices = pd.Series(close_prices)
     
@@ -303,14 +304,15 @@ def classify_vol_regime(close_prices, window=50, macro_window=500):
     log_returns = np.log(prices / prices.shift(1))
     
     # 2. Calculate Rolling Realized Volatility
-    # Root sum of squares of log returns over the specified window
+    # The 50-period window inherently filters tick noise. On a 1000-tick 
+    # chart (compared to faster intervals like 250-tick), this provides a 
+    # very smooth curve of the experienced volatility leading into a trade.
     rv = np.sqrt((log_returns**2).rolling(window=window).sum())
     
-    # 3. Calculate Dynamic Thresholds
-    # We use a rolling quantile to prevent lookahead bias in the backtest.
-    # min_periods=window allows classification to start as soon as the first RV value is generated.
-    p33 = rv.rolling(window=macro_window, min_periods=window).quantile(0.33)
-    p67 = rv.rolling(window=macro_window, min_periods=window).quantile(0.67)
+    # 3. Calculate Static, Global Thresholds (Perfect Hindsight)
+    # This looks at the entire array of calculated volatility to define regimes.
+    p33 = rv.quantile(0.33)
+    p67 = rv.quantile(0.67)
     
     # 4. Classify Regimes (0: Low, 1: Moderate, 2: High)
     regimes = pd.Series(np.nan, index=prices.index)
