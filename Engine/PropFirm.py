@@ -80,6 +80,8 @@ class PropFirmSimulator:
 
         self.rng = np.random.default_rng()
 
+        self.avg_trades_per_day = None
+
         # Challenge results
         self.ch_pass_rate = None
         self.ch_avg_days_to_pass = None
